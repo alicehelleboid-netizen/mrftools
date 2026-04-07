@@ -103,7 +103,7 @@ def wrapper_rounding(func):
 
 class ImageSeries(object):
 
-    def __init__(self,name,dict_config={},**kwargs):
+    def __init__(self,name,dict_config={}, fat_cs=None, **kwargs):
         self.name=name
         self.dict_config=dict_config
         self.paramDict = kwargs
@@ -147,9 +147,18 @@ class ImageSeries(object):
                 if "rounding_df" not in self.paramDict:
                     self.paramDict["rounding_df"] = DEFAULT_ROUNDING_df
 
-
         self.fat_amp=[0.0586, 0.0109, 0.0618, 0.1412, 0.66, 0.0673]
-        fat_cs = [-101.1, 208.3, 281.0, 305.7, 395.6, 446.2]
+        
+
+        if fat_cs is None:
+            # fat_cs = [-101.1, 208.3, 281.0, 305.7, 395.6, 446.2]
+            fat_cs = [-19.4, 40.0, 53.8, 58.6, 75.9, 85.5]
+
+        else :
+            self.fat_cs=fat_cs
+        
+        print('fat_cs',self.fat_cs)
+
         self.fat_cs = [- value / 1000 for value in fat_cs]  # temp
 
 
@@ -979,6 +988,8 @@ class RandomMap(ImageSeries):
 
         wT1 = self.dict_config["water_T1"]
         fT1 = self.dict_config["fat_T1"]
+        if type(fT1)==int:
+            fT1=[fT1]
         wT2 = self.dict_config["water_T2"]
         fT2 = self.dict_config["fat_T2"]
         att = self.dict_config["B1_att"]
@@ -1433,7 +1444,7 @@ class RandomMap3D(ImageSeries3D):
         self.mask = mask
 
     @wrapper_rounding
-    def buildParamMap(self, mask=None):
+    def buildParamMap(self, mask=None, wT1_fixed=None,B1_fixed=None,df_fixed=None):
 
         # print("Building Param Map")
         if mask is None:
@@ -1441,13 +1452,27 @@ class RandomMap3D(ImageSeries3D):
         else:
             self.mask = mask
 
-        wT1 = self.dict_config["water_T1"]
+        if wT1_fixed is not None:
+            wT1 = [wT1_fixed]
+        else:
+            wT1 = self.dict_config["water_T1"]
+
+        if B1_fixed is not None:
+            att = [B1_fixed]
+        else:
+            att = self.dict_config["B1_att"]
+
+        if df_fixed is not None:
+            df = [df_fixed]
+        else:
+            df = self.dict_config["delta_freqs"]
+            df = [- value / 1000 for value in df]
+
         fT1 = self.dict_config["fat_T1"]
+        if type(fT1)==int:
+            fT1=[fT1]
         wT2 = self.dict_config["water_T2"]
         fT2 = self.dict_config["fat_T2"]
-        att = self.dict_config["B1_att"]
-        df = self.dict_config["delta_freqs"]
-        df = [- value / 1000 for value in df]
         ff = self.dict_config["ff"]
 
         nb_slices=self.paramDict["nb_slices"]
@@ -1472,7 +1497,6 @@ class RandomMap3D(ImageSeries3D):
             map_attB1 = create_random_map(att, self.region_size, sliced_image_size, sliced_mask)
             map_df = create_random_map(df, self.region_size, sliced_image_size, sliced_mask)
             map_ff = create_random_map(ff, self.region_size, sliced_image_size, sliced_mask)
-
             j_current = j*repeat_slice+self.paramDict["nb_empty_slices"]
             j_next = np.minimum((j+1)*repeat_slice,nb_slices)+self.paramDict["nb_empty_slices"]
 

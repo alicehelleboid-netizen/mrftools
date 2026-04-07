@@ -62,6 +62,7 @@ if __name__ == '__main__':
     parser_masks_singular.add_argument('--filevolumes', type=str,nargs='?', const=DATA / "volumes_singular.npy", default=DATA / "volumes_singular.npy")
     parser_masks_singular.add_argument('--l', type=int,nargs='?', const=0, default=0)
     parser_masks_singular.add_argument('--threshold', type=float,nargs='?', const=0.025, default=0.025) 
+    parser_masks_singular.add_argument('--it', type=int,nargs='?', const=2, default=2) 
 
     parser_maps = subparsers.add_parser('build_maps')
     parser_maps.add_argument('--filevolumes', type=str,nargs='?', const=DATA / "volumes.npy", default=DATA / "volumes.npy")
@@ -76,6 +77,7 @@ if __name__ == '__main__':
     parser_maps.add_argument('--useGPU', type=bool,nargs='?', const=True, default=True)
     parser_maps.add_argument('--returncost', type=bool,nargs='?', const=False, default=False)
     parser_maps.add_argument('--volumestype', type=str,nargs='?', const="raw", default="raw")
+    parser_maps.add_argument('--with-FF', type=bool,nargs='?', const=False, default=False)
 
     parser_dico = subparsers.add_parser('generate_dico')
     parser_dico.add_argument('--dictdir', type=str, default='./mrf_dict')
@@ -88,6 +90,7 @@ if __name__ == '__main__':
     parser_dico.add_argument('--isbuildphi', type=bool,nargs='?', const=False, default=False) 
     parser_dico.add_argument('--force', type=bool,nargs='?', const=False, default=False) 
     parser_dico.add_argument('--pca', type=int,nargs='?', const=6, default=6)
+    parser_dico.add_argument('--withff', type=bool,nargs='?', const=False, default=False)
 
     parser_gen_dict = subparsers.add_parser('gen_dict_mrf')
     parser_gen_dict.add_argument("--dest",type=str,default="mrf_dict",help="Destination directory for MRF dictionary")
@@ -99,10 +102,11 @@ if __name__ == '__main__':
     parser_gen_dict.add_argument("--index",type=int,default=-1,help="Index of the .dat file for multiple acquisitions (default -1 for single acquisition).")
     parser_gen_dict.add_argument("--wait-time",type=float,default=5.0,help="Waiting time (s) at the end of each MRF repetition.")
     parser_gen_dict.add_argument("--echo-spacing",type=float,default=None,help="Waiting time (ms) from echo time to next RF pulse.")
-    parser_gen_dict.add_argument("--is_build_phi",type=bool,default=True,help="Whether to build temporal basis from dictionary")
+    parser_gen_dict.add_argument("--isbuildphi",type=bool,default=False,help="Whether to build temporal basis from dictionary")
     parser_gen_dict.add_argument("--pca",type=int,default=6,help="Number of components for the dictionary projection on the temporal basis")
     parser_gen_dict.add_argument("--force",type=bool,default=False,help="Force generation even if folder already exists")
     parser_gen_dict.add_argument("--inversion-time", type=float, default=8.32, help="Inversion time (ms).")
+    parser_gen_dict.add_argument("--withff", type=bool,nargs='?', const=False, default=False)
     
     
     args = parser.parse_args()
@@ -163,6 +167,8 @@ if __name__ == '__main__':
         file_volumes_gif=os.path.join(path,"volumes.gif")
 
         np.save(file_volumes,volumes)
+        if len(volumes.shape)==2:
+            masks=volumes.reshape((1,volumes.shape[0],-1))
         gif=[]
         sl=int(volumes.shape[1]/2)
         volume_for_gif = np.abs(volumes[:,sl])
@@ -231,6 +237,8 @@ if __name__ == '__main__':
         file_volumes_gif=os.path.join(path,"volumes_singular.gif")
 
         np.save(file_volumes,volumes_singular)
+        if len(volumes_singular.shape)==3:
+            volumes_singular=volumes_singular.reshape((6,1,volumes_singular.shape[1],-1))
         gif=[]
         sl=int(volumes_singular.shape[1]/2)
         volume_for_gif = np.abs(volumes_singular[:,sl])
@@ -257,6 +265,8 @@ if __name__ == '__main__':
         file_masks_gif=os.path.join(path,"masks.gif")
 
         np.save(file_masks,masks)
+        if len(masks.shape)==2:
+            masks=masks.reshape((1,masks.shape[0],-1))
         gif=[]
         volume_for_gif = np.abs(masks)
         for i in range(volume_for_gif.shape[0]):
@@ -273,32 +283,37 @@ if __name__ == '__main__':
         file_volumes= args.filevolumes
         l=args.l
         threshold=args.threshold
+        it=args.it
         volumes_singular=np.load(file_volumes)
-        masks=build_mask_from_singular_volume(volumes_singular,l,threshold=threshold, it=2)
+
+        masks=build_mask_from_singular_volume(volumes_singular,l,threshold=threshold, it=it)
 
         path, _ = os.path.split(file_volumes)
         print(path)
 
         file_masks=os.path.join(path,"masks_singular.npy")
         file_masks_gif=os.path.join(path,"masks_singular.gif")
+        print(file_masks)
 
         np.save(file_masks,masks)
+        if len(masks.shape)==2:
+            masks=masks.reshape((1,masks.shape[0],-1))
         gif=[]
         volume_for_gif = np.abs(masks)
-        # for i in range(volume_for_gif.shape[0]):
-        #     img = Image.fromarray(np.uint8(volume_for_gif[i]/np.max(volume_for_gif[i])*255), 'L')
-        #     img=img.convert("P")
-        #     gif.append(img)
+        for i in range(volume_for_gif.shape[0]):
+            img = Image.fromarray(np.uint8(volume_for_gif[i]/np.max(volume_for_gif[i])*255), 'L')
+            img=img.convert("P")
+            gif.append(img)
 
                 
-        # gif[0].save(file_masks_gif,save_all=True, append_images=gif[1:], optimize=False, duration=100, loop=0)
+        gif[0].save(file_masks_gif,save_all=True, append_images=gif[1:], optimize=False, duration=100, loop=0)
     
 
-        img = Image.fromarray(
-            (volume_for_gif > 0).astype(np.uint8) * 255,  # mask binaire
-            mode='L'
-        )
-        img.save(file_masks_gif, save_all=True, optimize=False, duration=100, loop=0)
+        # img = Image.fromarray(
+        #     (volume_for_gif > 0).astype(np.uint8) * 255,  # mask binaire
+        #     mode='L'
+        # )
+        # img.save(file_masks_gif, save_all=True, optimize=False, duration=100, loop=0)
 
 
     elif args.command=="build_maps":
@@ -314,6 +329,7 @@ if __name__ == '__main__':
         useGPU=bool(args.useGPU)
         return_cost=bool(args.returncost)
         volumes_type=str(args.volumestype)
+        with_FF=bool(args.with_FF)
         
         print(dictfiles)
         volumes=np.load(file_volumes)
@@ -338,7 +354,7 @@ if __name__ == '__main__':
 
 
         check_dico(dico_hdr,file_seq)
-        all_maps=build_maps(volumes,masks,dictfiles,signal,useGPU=useGPU,split=split,return_cost=return_cost,pca=pca,volumes_type=volumes_type)
+        all_maps=build_maps(volumes,masks,dictfiles,signal,useGPU=useGPU,split=split,return_cost=return_cost,pca=pca,volumes_type=volumes_type, with_FF=with_FF)
         save_maps(all_maps,file_seq)
 
     elif args.command=="generate_dico":
@@ -352,6 +368,7 @@ if __name__ == '__main__':
         is_build_phi=args.isbuildphi
         force=args.force
         L0=int(args.pca)
+        with_ff=args.withff
 
         if sequence_file is None:
             print("No sequence config was given - using default SEQ_CONFIG")
@@ -368,7 +385,7 @@ if __name__ == '__main__':
             parser.exit()
         dictdir.mkdir(parents=True, exist_ok=True)
 
-        generate_dictionaries(sequence_file,reco,min_TR_delay,dictconf,dictconf_light,TI=8.32, dest=dictdir,is_build_phi=is_build_phi,L0=L0)
+        generate_dictionaries(sequence_file,reco,min_TR_delay,dictconf,dictconf_light,TI=8.32, dest=dictdir,is_build_phi=is_build_phi,L0=L0, with_ff=with_ff)
 
 
     elif args.command=="gen_dict_mrf":
@@ -384,10 +401,13 @@ if __name__ == '__main__':
         wait_time=args.wait_time
         echo_spacing=args.echo_spacing
         inversion_time=args.inversion_time
-        is_build_phi=args.is_build_phi
+        is_build_phi=args.isbuildphi
         pca=args.pca
         force=args.force
         index=args.index
+        with_ff=args.withff
+
+        
 
         if folder is not None:
             folder = Path(folder)
@@ -416,6 +436,11 @@ if __name__ == '__main__':
             raise ma.ExpectedError(f"Output directory ({dest}) is not empty. Aborting.")
         dest.mkdir(exist_ok=True, parents=True)
 
+        if with_ff is True :
+            print("generating dico with FF keys")
+        else :
+            print("generating dico without FF keys")
+
         generate_dictionaries(
             seqfile,
             wait_time,
@@ -425,7 +450,8 @@ if __name__ == '__main__':
             TI=inversion_time,
             dest=dest,
             is_build_phi=is_build_phi,
-            L0=pca
+            L0=pca,
+            with_ff=with_ff
             )
     
     else:

@@ -126,12 +126,17 @@ def combine_mrf_dict_components(mrfdict ,FF_list ,aggregate_components=True):
     return keys_with_ff,signal_reshaped
 
 
-def build_phi(mrfdict,FFs=np.arange(0.1,1.09,0.1)):
+def build_phi(mrfdict,FFs=np.arange(0.,1.0,0.05), with_FF=False):
 
     print("#########################################Building phi matrix from dictionary components")
     #mrfdict = dictsearch.Dictionary()
     print("Generating full dictionary")
-    keys,values=combine_mrf_dict_components(mrfdict,FFs)
+
+    if with_FF is True :
+        values=mrfdict.values
+        values =values.squeeze()
+    else :
+        keys,values=combine_mrf_dict_components(mrfdict,FFs)
 
     import dask.array as da
     print("Performing svd")
@@ -166,6 +171,7 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
 
 
     num_group = int(nb_signals / split) + 1
+
 
     #idx_max_all_unique = []
     #alpha_optim = []
@@ -274,15 +280,44 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
             del c
             del discr
 
-            current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
-                    1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
+            mask1 = (alpha1 >= 0) & (alpha1 <= 1)
+            mask2 = (alpha2 >= 0) & (alpha2 <= 1)
+            mask_both = mask1 & mask2
+            apha_more_0 = (alpha1 >= 0) & (alpha2 >= 0) 
+            alpha_less_1 = (alpha1 <= 1) & (alpha2 <= 1) 
+            alpha_out_bounds = ~mask1 & ~mask2
+
+            J_alpha1 = np.abs((
+                                    1 - alpha1) * current_sig_ws_for_phase + alpha1 * current_sig_fs_for_phase) / np.sqrt(
+                (
+                        1 - alpha1) ** 2 * var_w + alpha1 ** 2 * var_f + 2 * alpha1 * (
+                        1 - alpha1) * sig_wf)
+            
+            J_alpha2 = np.abs((
+                                    1 - alpha2) * current_sig_ws_for_phase + alpha2 * current_sig_fs_for_phase) / np.sqrt(
+                (
+                        1 - alpha2) ** 2 * var_w + alpha2 ** 2 * var_f + 2 * alpha2 * (
+                        1 - alpha2) * sig_wf)
+            
+            current_alpha_all_unique=np.zeros_like(alpha1)
+            current_alpha_all_unique[mask1 & ~mask2] = alpha1[mask1 & ~mask2]
+            current_alpha_all_unique[~mask1 & mask2] = alpha2[~mask1 & mask2]
+
+            mask_choice_alpha1 = mask_both & (J_alpha2 < J_alpha1)
+            current_alpha_all_unique[mask_choice_alpha1] = alpha1[mask_choice_alpha1]
+
+            mask_choice_alpha2 = mask_both & (J_alpha1 <= J_alpha2)
+            current_alpha_all_unique[mask_choice_alpha2] = alpha2[mask_choice_alpha2]
+
+            # current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
+            #         1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
 
             if verbose:
                 start = datetime.now()
 
-            apha_more_0=(current_alpha_all_unique>=0)
-            alpha_less_1=(current_alpha_all_unique<=1)
-            alpha_out_bounds=(1*(apha_more_0))*(1*(alpha_less_1))==0
+            # apha_more_0=(current_alpha_all_unique>=0)
+            # alpha_less_1=(current_alpha_all_unique<=1)
+            # alpha_out_bounds=(1*(apha_more_0))*(1*(alpha_less_1))==0
 
             J_0=np.abs(current_sig_ws_for_phase)/np.sqrt(var_w)
 
@@ -308,19 +343,19 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
 
             end = datetime.now()
 
-            all_J = np.stack([J_all, J_0, J_1], axis=0)
+            # all_J = np.stack([J_all, J_0, J_1], axis=0)
 
-            ind_max_J = np.argmax(all_J, axis=0)
+            # ind_max_J = np.argmax(all_J, axis=0)
 
-            del all_J
+            # del all_J
 
 
-            J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
-            del J_0
-            del J_1
+            # J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
+            # del J_0
+            # del J_1
 
-            current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
-                        ind_max_J == 2) * 1
+            # current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
+            #             ind_max_J == 2) * 1
 
             idx_max_all_current = np.argmax(J_all, axis=0)
             current_alpha_all_unique_optim=current_alpha_all_unique[idx_max_all_current, np.arange(J_all.shape[1])]
@@ -380,17 +415,42 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
             alpha1 = (-b + np.sqrt(discr)) / (2 * a)
             alpha2 = (-b - np.sqrt(discr)) / (2 * a)
 
-            #################################################################################################################################""""
+            #################################################################################################################################"""""
             del a
             del b
             del c
             del discr
 
-            current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
-                    1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
+            # current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
+            #         1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
+            mask1 = (alpha1 >= 0) & (alpha1 <= 1)
+            mask2 = (alpha2 >= 0) & (alpha2 <= 1)
+            mask_both = mask1 & mask2
+            apha_more_0 = (alpha1 >= 0) & (alpha2 >= 0) 
+            alpha_less_1 = (alpha1 <= 1) & (alpha2 <= 1) 
+            alpha_out_bounds = ~mask1 & ~mask2
 
-            # current_alpha_all_unique_2 = (1 * (alpha2 >= 0) & (alpha2 <= 1)) * alpha2 + (
-            #            1 - (1*(alpha2 >= 0) & (alpha2 <= 1))) * alpha1
+            J_alpha1 = cp.abs((
+                                    1 - alpha1) * current_sig_ws_for_phase + alpha1 * current_sig_fs_for_phase) / np.sqrt(
+                (
+                        1 - alpha1) ** 2 * var_w + alpha1 ** 2 * var_f + 2 * alpha1 * (
+                        1 - alpha1) * sig_wf)
+            
+            J_alpha2 = cp.abs((
+                                    1 - alpha2) * current_sig_ws_for_phase + alpha2 * current_sig_fs_for_phase) / np.sqrt(
+                (
+                        1 - alpha2) ** 2 * var_w + alpha2 ** 2 * var_f + 2 * alpha2 * (
+                        1 - alpha2) * sig_wf)
+            
+            current_alpha_all_unique=cp.zeros_like(alpha1)
+            current_alpha_all_unique[mask1 & ~mask2] = alpha1[mask1 & ~mask2]
+            current_alpha_all_unique[~mask1 & mask2] = alpha2[~mask1 & mask2]
+
+            mask_choice_alpha1 = mask_both & (J_alpha2 < J_alpha1)
+            current_alpha_all_unique[mask_choice_alpha1] = alpha1[mask_choice_alpha1]
+
+            mask_choice_alpha2 = mask_both & (J_alpha1 <= J_alpha2)
+            current_alpha_all_unique[mask_choice_alpha2] = alpha2[mask_choice_alpha2]
 
             del alpha1
             del alpha2
@@ -402,9 +462,9 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
             if verbose:
                 start = datetime.now()
 
-            apha_more_0 = (current_alpha_all_unique >= 0)
-            alpha_less_1 = (current_alpha_all_unique <= 1)
-            alpha_out_bounds = (1 * (apha_more_0)) * (1 * (alpha_less_1)) == 0
+            # apha_more_0 = (current_alpha_all_unique >= 0)
+            # alpha_less_1 = (current_alpha_all_unique <= 1)
+            # alpha_out_bounds = (1 * (apha_more_0)) * (1 * (alpha_less_1)) == 0
 
 
 
@@ -429,20 +489,20 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
                         1 - current_alpha_all_unique) ** 2 * var_w + current_alpha_all_unique ** 2 * var_f + 2 * current_alpha_all_unique * (
                         1 - current_alpha_all_unique) * sig_wf)
 
+            
+            # all_J = cp.stack([J_all,J_0, J_1], axis=0)
 
-            all_J = cp.stack([J_all, J_0, J_1], axis=0)
+            # ind_max_J = cp.argmax(all_J, axis=0)
 
-            ind_max_J = cp.argmax(all_J, axis=0)
-
-            del all_J
+            # del all_J
 
 
-            J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
-            del J_0
-            del J_1
+            # J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
+            # del J_0
+            # del J_1
 
-            current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
-                    ind_max_J == 2) * 1
+            # current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
+            #         ind_max_J == 2) * 1
 
             idx_max_all_current = cp.argmax(J_all, axis=0)
             current_alpha_all_unique_optim = current_alpha_all_unique[idx_max_all_current, np.arange(J_all.shape[1])]
@@ -450,8 +510,7 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
             idx_max_all_unique[j_signal:j_signal_next] = idx_max_all_current
             alpha_optim[j_signal:j_signal_next]=current_alpha_all_unique_optim
 
-            
-
+        
             if return_matched_signals:
                 d = (
                             1 - current_alpha_all_unique_optim) * current_sig_ws_for_phase[idx_max_all_current, cp.arange(J_all.shape[1])] + current_alpha_all_unique_optim * current_sig_fs_for_phase[idx_max_all_current, cp.arange(J_all.shape[1])]
@@ -528,8 +587,6 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
         J_optim = np.array(J_optim)
 
 
-
-
     idx_max_all_unique=idx_max_all_unique.astype(int)
     params_all_unique = np.array(
         [keys[idx] + (alpha_optim[l],) for l, idx in enumerate(idx_max_all_unique)])
@@ -565,14 +622,93 @@ def match_signals_v2(all_signals,keys,pca_water,pca_fat,array_water_unique,array
     else:
         return map_rebuilt, None, None
 
+def match_signals_v2_with_FF_in_keys(all_signals, dico_signals, keys, split, useGPU_dictsearch=False, return_matched_signals=False):
+    """
+    Simple matching when FF is already IN the dictionary keys and signals are pre-combined.
+    No need to optimize FF or separate water/fat.
+    
+    Parameters:
+    -----------
+    all_signals: (n_timepoints, n_signals) - incoming signals
+    dico_signals: (n_params, n_timepoints) - dictionary pre-combined signals (FF already included in them)
+    keys: list of tuples with FF as last element, e.g. (wT1, fT1, B1, df, FF)
+    split: batch size for processing
+    useGPU_dictsearch: use GPU
+    return_matched_signals: return matched signals for diagnostics
+    
+    Returns:
+    --------
+    map_rebuilt: dict with all parameters including FF
+    matched_signals (optional): the reconstructed signals
+    """
+    nb_signals = all_signals.shape[1]
+    nb_dico_signals = dico_signals.shape[0]
+    
+    print(f"Matching {nb_signals} incoming signals against {nb_dico_signals} dictionary entries (with FF in keys)")
+    
+    num_group = int(nb_signals / split) + 1
+    
+    if not useGPU_dictsearch:
+        idx_max = np.zeros(nb_signals, dtype="int64")
+        phase_optim = np.zeros(nb_signals) if return_matched_signals else None
+    else:
+        idx_max = cp.zeros(nb_signals, dtype="int64")
+        phase_optim = cp.zeros(nb_signals) if return_matched_signals else None
 
+    for j in tqdm(range(num_group)):
+        j_signal = j * split
+        j_signal_next = np.minimum((j + 1) * split, nb_signals)
+        
+        if j_signal == j_signal_next:
+            continue
+        
+        if not useGPU_dictsearch:
+            correlations = np.matmul(dico_signals, all_signals[:, j_signal:j_signal_next].conj())
+            correlations = np.abs(correlations)
+            correlations /= (
+            np.linalg.norm(dico_signals, axis=1)[:,None] *
+            np.linalg.norm(all_signals[:, j_signal:j_signal_next], axis=0)[None,:] + 1e-10
+            )
+            idx_max[j_signal:j_signal_next] = np.argmax(correlations, axis=0)
+            
+        else:
+            batch_signals_gpu = cp.asarray(all_signals[:, j_signal:j_signal_next])
+            dico_signals_gpu = cp.asarray(dico_signals)
+            correlations = cp.matmul(dico_signals_gpu, batch_signals_gpu.conj())
+            correlations = cp.abs(correlations)
+            correlations /= (
+            cp.linalg.norm(dico_signals_gpu, axis=1)[:,None] *
+            cp.linalg.norm(batch_signals_gpu, axis=0)[None,:] + 1e-10
+            )
+            idx_max[j_signal:j_signal_next] = cp.argmax(correlations, axis=0)
+    
+    if useGPU_dictsearch:
+        idx_max = idx_max.get()
+    
+    keys_for_map = [tuple(k) for k in keys]
+    params_all = np.array([keys_for_map[int(idx)] for idx in idx_max])
+    
+    map_rebuilt = {
+        "wT1": params_all[:, 0],
+        "fT1": params_all[:, 1],
+        "attB1": params_all[:, 2],
+        "df": params_all[:, 3],
+        "ff": params_all[:, 4]
+    }
+    
+    if return_matched_signals:
+        matched_signals = dico_signals[idx_max.astype(int), :].T
+        return map_rebuilt, matched_signals
+    else:
+        return map_rebuilt
 
 def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fat,transformed_array_water_unique,transformed_array_fat_unique,var_w_total,var_f_total,sig_wf_total,index_water_unique,index_fat_unique,useGPU_dictsearch,unique_keys,d_T1,d_fT1,d_B1,d_DF,labels,split,high_ff=False,return_cost=False):
 
     nb_clusters = unique_keys.shape[-1]
-
-    keys = np.array(keys)
-    unique_keys = np.array(unique_keys)
+    
+    if not(useGPU_dictsearch) :
+        keys = np.array(keys)
+        unique_keys = np.array(unique_keys)
 
 
     nb_signals=all_signals_current.shape[-1]
@@ -590,6 +726,13 @@ def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fa
             J_optim = cp.zeros(nb_signals)
             phase_optim=cp.zeros(nb_signals)
 
+    # J0_collected = []
+    # J1_collected = []
+    # # Jall_collected = []
+    # ind_max_J_collected=[]
+
+    alpha1_list = []
+    alpha2_list = []
 
     if not (useGPU_dictsearch):
         for cl in tqdm(range(nb_clusters)):
@@ -645,16 +788,53 @@ def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fa
                 del b
                 del c
                 del discr
-                current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
-                        1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
 
-                apha_more_0 = (current_alpha_all_unique >= 0)
-                alpha_less_1 = (current_alpha_all_unique <= 1)
-                alpha_out_bounds = (1 * (apha_more_0)) * (1 * (alpha_less_1)) == 0
+                alpha1_list.append(alpha1.copy())
+                alpha2_list.append(alpha2.copy())
+
+                mask1 = (alpha1 >= 0) & (alpha1 <= 1)
+                mask2 = (alpha2 >= 0) & (alpha2 <= 1)
+                mask_both = mask1 & mask2
+                apha_more_0 = (alpha1 >= 0) & (alpha2 >= 0) 
+                alpha_less_1 = (alpha1 <= 1) & (alpha2 <= 1) 
+                alpha_out_bounds = ~mask1 & ~mask2
+
+                J_alpha1 = np.abs((
+                                       1 - alpha1) * current_sig_ws_for_phase + alpha1 * current_sig_fs_for_phase) / np.sqrt(
+                    (
+                            1 - alpha1) ** 2 * var_w + alpha1 ** 2 * var_f + 2 * alpha1 * (
+                            1 - alpha1) * sig_wf)
+                
+                J_alpha2 = np.abs((
+                                       1 - alpha2) * current_sig_ws_for_phase + alpha2 * current_sig_fs_for_phase) / np.sqrt(
+                    (
+                            1 - alpha2) ** 2 * var_w + alpha2 ** 2 * var_f + 2 * alpha2 * (
+                            1 - alpha2) * sig_wf)
+
+                current_alpha_all_unique=np.zeros_like(alpha1)
+                current_alpha_all_unique[mask1 & ~mask2] = alpha1[mask1 & ~mask2]
+                current_alpha_all_unique[~mask1 & mask2] = alpha2[~mask1 & mask2]
+
+                mask_choice_alpha1 = mask_both & (J_alpha2 < J_alpha1)
+                current_alpha_all_unique[mask_choice_alpha1] = alpha1[mask_choice_alpha1]
+
+                mask_choice_alpha2 = mask_both & (J_alpha1 <= J_alpha2)
+                current_alpha_all_unique[mask_choice_alpha2] = alpha2[mask_choice_alpha2]
+
+                # current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
+                #         1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
+
+                # apha_more_0 = (current_alpha_all_unique >= 0)
+                # alpha_less_1 = (current_alpha_all_unique <= 1)
+                # alpha_out_bounds = (1 * (apha_more_0)) * (1 * (alpha_less_1)) == 0
 
                 if not(high_ff):
                     J_0 = np.abs(current_sig_ws_for_phase) / np.sqrt(var_w)
                 J_1 = np.abs(current_sig_fs_for_phase) / np.sqrt(var_f)
+
+                # if not(high_ff):
+                #     J0_collected.append(J_0.copy())
+                # J1_collected.append(J_1.copy())
 
                 if not(high_ff):
                     current_alpha_all_unique[alpha_out_bounds] = np.argmax(
@@ -669,23 +849,25 @@ def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fa
                             1 - current_alpha_all_unique) ** 2 * var_w + current_alpha_all_unique ** 2 * var_f + 2 * current_alpha_all_unique * (
                             1 - current_alpha_all_unique) * sig_wf)
 
+                # Jall_collected.append(J_all.copy())
 
-                if not(high_ff):
-                    all_J = np.stack([J_all, J_0, J_1], axis=0)
-                else:
-                    all_J = np.stack([J_all, J_1], axis=0)
-                ind_max_J = np.argmax(all_J, axis=0)
-                del all_J
 
-                if not(high_ff):
-                    J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
-                    del J_0
-                    current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
-                            ind_max_J == 2) * 1
-                else:
-                    J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_1
-                    current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 1
-                del J_1
+                # if not(high_ff):
+                #     all_J = np.stack([J_all], axis=0)
+                # else:
+                #     all_J = np.stack([J_all], axis=0)
+                # ind_max_J = np.argmax(all_J, axis=0)
+                # del all_J
+
+                # if not(high_ff):
+                #     J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
+                #     del J_0
+                #     current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
+                #             ind_max_J == 2) * 1
+                # else:
+                #     J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_1
+                #     current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 1
+                # del J_1
 
                 idx_max_all_current_sig = np.argmax(J_all, axis=0)
                 current_alpha_all_unique_optim = current_alpha_all_unique[idx_max_all_current_sig, np.arange(J_all.shape[1])]
@@ -753,6 +935,7 @@ def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fa
                                               transformed_all_signals_water.conj())
                 sig_fs_all_unique = cp.matmul(cp.asarray(transformed_array_fat_unique),
                                               transformed_all_signals_fat.conj())
+
                 current_sig_ws_for_phase = sig_ws_all_unique[index_water_unique, :][retained_signals]
                 current_sig_fs_for_phase = sig_fs_all_unique[index_fat_unique, :][retained_signals]
                 A = sig_wf * current_sig_ws_for_phase - var_w * current_sig_fs_for_phase
@@ -768,16 +951,53 @@ def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fa
                 del b
                 del c
                 del discr
-                current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
-                        1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
-                # current_alpha_all_unique = np.minimum(np.maximum(current_alpha_all_unique, 0.0), 1.0)
-                apha_more_0 = (current_alpha_all_unique >= 0)
-                alpha_less_1 = (current_alpha_all_unique <= 1)
-                alpha_out_bounds = (1 * (apha_more_0)) * (1 * (alpha_less_1)) == 0
+
+                alpha1_list.append(alpha1.copy())
+                alpha2_list.append(alpha2.copy())
+
+                mask1 = (alpha1 >= 0) & (alpha1 <= 1)
+                mask2 = (alpha2 >= 0) & (alpha2 <= 1)
+                mask_both = mask1 & mask2
+                apha_more_0 = (alpha1 >= 0) & (alpha2 >= 0) 
+                alpha_less_1 = (alpha1 <= 1) & (alpha2 <= 1) 
+                alpha_out_bounds = ~mask1 & ~mask2
+
+                J_alpha1 = cp.abs((
+                                       1 - alpha1) * current_sig_ws_for_phase + alpha1 * current_sig_fs_for_phase) / np.sqrt(
+                    (
+                            1 - alpha1) ** 2 * var_w + alpha1 ** 2 * var_f + 2 * alpha1 * (
+                            1 - alpha1) * sig_wf)
+                
+                J_alpha2 = cp.abs((
+                                       1 - alpha2) * current_sig_ws_for_phase + alpha2 * current_sig_fs_for_phase) / np.sqrt(
+                    (
+                            1 - alpha2) ** 2 * var_w + alpha2 ** 2 * var_f + 2 * alpha2 * (
+                            1 - alpha2) * sig_wf)
+                
+                current_alpha_all_unique=cp.zeros_like(alpha1)
+                current_alpha_all_unique[mask1 & ~mask2] = alpha1[mask1 & ~mask2]
+                current_alpha_all_unique[~mask1 & mask2] = alpha2[~mask1 & mask2]
+
+                mask_choice_alpha1 = mask_both & (J_alpha2 < J_alpha1)
+                current_alpha_all_unique[mask_choice_alpha1] = alpha1[mask_choice_alpha1]
+
+                mask_choice_alpha2 = mask_both & (J_alpha1 <= J_alpha2)
+                current_alpha_all_unique[mask_choice_alpha2] = alpha2[mask_choice_alpha2]
+
+                # current_alpha_all_unique = (1 * (alpha1 >= 0) & (alpha1 <= 1)) * alpha1 + (
+                #         1 - (1 * (alpha1 >= 0) & (alpha1 <= 1))) * alpha2
+                # # current_alpha_all_unique = np.minimum(np.maximum(current_alpha_all_unique, 0.0), 1.0)
+                # apha_more_0 = (current_alpha_all_unique >= 0)
+                # alpha_less_1 = (current_alpha_all_unique <= 1)
+                # alpha_out_bounds = (1 * (apha_more_0)) * (1 * (alpha_less_1)) == 0
 
                 if not(high_ff):
                     J_0 = cp.abs(current_sig_ws_for_phase) / cp.sqrt(var_w)
                 J_1 = cp.abs(current_sig_fs_for_phase) / cp.sqrt(var_f)
+
+                # if not(high_ff):
+                #     J0_collected.append(J_0.copy())
+                # J1_collected.append(J_1.copy())
 
                 if not(high_ff):
                     current_alpha_all_unique[alpha_out_bounds] = cp.argmax(
@@ -785,29 +1005,33 @@ def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fa
                 else:
                     current_alpha_all_unique[alpha_out_bounds] = 1
 
+
                 J_all = cp.abs((
                                        1 - current_alpha_all_unique) * current_sig_ws_for_phase + current_alpha_all_unique * current_sig_fs_for_phase) / cp.sqrt(
                     (
                             1 - current_alpha_all_unique) ** 2 * var_w + current_alpha_all_unique ** 2 * var_f + 2 * current_alpha_all_unique * (
                             1 - current_alpha_all_unique) * sig_wf)
 
+                # Jall_collected.append(J_all.copy())
 
-                if not(high_ff):
-                    all_J = cp.stack([J_all, J_0, J_1], axis=0)
-                else:
-                    all_J = cp.stack([J_all, J_1], axis=0)
-                ind_max_J = cp.argmax(all_J, axis=0)
-                del all_J
 
-                if not(high_ff):
-                    J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
-                    del J_0
-                    current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
-                            ind_max_J == 2) * 1
-                else:
-                    J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_1
-                    current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 1
-                del J_1
+                # if not(high_ff):
+                #     all_J = cp.stack([J_all, J_0, J_1], axis=0)
+                # else:
+                #     all_J = cp.stack([J_all, J_1], axis=0)
+                # ind_max_J = cp.argmax(all_J, axis=0)
+                # del all_J
+
+                # if not(high_ff):
+                #     J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_0 + (ind_max_J == 2) * J_1
+                #     del J_0
+                #     current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 0 + (
+                #             ind_max_J == 2) * 1
+                # else:
+                #     J_all = (ind_max_J == 0) * J_all + (ind_max_J == 1) * J_1
+                #     current_alpha_all_unique = (ind_max_J == 0) * current_alpha_all_unique + (ind_max_J == 1) * 1
+                # del J_1
+
 
                 idx_max_all_current_sig = cp.argmax(J_all, axis=0)
                 current_alpha_all_unique_optim = current_alpha_all_unique[idx_max_all_current_sig, cp.arange(J_all.shape[1])]
@@ -843,6 +1067,41 @@ def match_signals_v2_clustered_on_dico(all_signals_current,keys,pca_water,pca_fa
             J_optim=J_optim.get()
             phase_optim=phase_optim.get()
 
+    # if useGPU_dictsearch:
+    #         ind_max_J_collected_cpu = [j.get() for j in ind_max_J_collected]
+    #         np.save("ind_max_J_collected.npy", np.array(ind_max_J_collected_cpu, dtype=object))
+    # if J0_collected:
+    #     if useGPU_dictsearch:
+    #         J0_cpu = [j.get() for j in J0_collected]
+    #         np.save("J0.npy", np.array(J0_cpu, dtype=object))
+    #     else:
+    #         np.save("J0.npy", np.array(J0_collected, dtype=object))
+    # if J1_collected:
+    #     if useGPU_dictsearch:
+    #         J1_cpu = [j.get() for j in J1_collected]
+    #         np.save("J1.npy", np.array(J1_cpu, dtype=object))
+    #     else:
+    #         np.save("J1.npy", np.array(J1_collected, dtype=object))
+    # if Jall_collected:
+    #     if useGPU_dictsearch:
+    #         Jall_cpu = [j.get() for j in Jall_collected]
+    #         np.save("Jall.npy", np.array(Jall_cpu, dtype=object))
+    #     else:
+    #         np.save("Jall.npy", np.array(Jall_collected, dtype=object))
+
+    if alpha1_list:
+        if useGPU_dictsearch:
+            alpha1_cpu = [a.get() for a in alpha1_list]
+            np.save("alpha1.npy", np.array(alpha1_cpu, dtype=object))
+        else:
+            np.save("alpha1.npy", np.array(alpha1_list, dtype=object))
+    if alpha2_list:
+        if useGPU_dictsearch:
+            alpha2_cpu = [a.get() for a in alpha2_list]
+            np.save("alpha2.npy", np.array(alpha2_cpu, dtype=object))
+        else:
+            np.save("alpha2.npy", np.array(alpha2_list, dtype=object))
+    np.save("alpha_optim.npy", alpha_optim_low_ff)
 
     if return_cost:
         return idx_max_all_unique_low_ff,alpha_optim_low_ff,J_optim,phase_optim
@@ -864,7 +1123,7 @@ class Optimizer(object):
 
 class SimpleDictSearch(Optimizer):
 
-    def __init__(self,seq=None,split=500,pca=True,threshold_pca=15,useGPU_dictsearch=False,remove_duplicate_signals=False,threshold=None,return_matched_signals=True,volumes_type="raw",**kwargs):
+    def __init__(self,seq=None,split=500,pca=True,threshold_pca=15,useGPU_dictsearch=False,remove_duplicate_signals=False,threshold_ff=None,return_matched_signals=True,volumes_type="raw",**kwargs):
         
         super().__init__(**kwargs)
         self.paramDict["split"] = split
@@ -875,7 +1134,7 @@ class SimpleDictSearch(Optimizer):
 
 
         self.paramDict["useGPU_dictsearch"]=useGPU_dictsearch
-        self.paramDict["threshold"]=threshold
+        self.paramDict["threshold_ff"]=threshold_ff
 
         if volumes_type not in ["singular", "raw"]:
             raise ValueError('volumes_type must be either "singular" or "raw".')
@@ -1058,7 +1317,361 @@ class SimpleDictSearch(Optimizer):
 
 
 
-    def search_patterns_test_multi_2_steps_dico(self, dicofull_file, volumes, signal=None, retained_timesteps=None):
+    # def search_patterns_test_multi_2_steps_dico(self, dicofull_file, volumes, signal=None, retained_timesteps=None):
+
+    #     if self.mask is None:
+    #         mask = build_mask_from_volume(volumes)
+    #     else:
+    #         mask = self.mask
+
+    #     volumes_type=self.paramDict["volumes_type"]
+
+    #     if "clustering" not in self.paramDict:
+    #         self.paramDict["clustering"]=True
+
+    #     split = self.paramDict["split"]
+    #     pca = self.paramDict["pca"]
+
+    #     if volumes.ndim==5:
+    #         ntimesteps=volumes.shape[1]
+    #     else:
+    #         ntimesteps=volumes.shape[0]
+
+    #     threshold_pca = self.paramDict["threshold_pca"]
+        
+    #     threshold_pca=np.minimum(ntimesteps,threshold_pca)
+
+    #     threshold_ff=self.paramDict["threshold_ff"]
+    #     # dictfile_light=self.paramDict["dictfile_light"]
+
+    #     if "return_cost" not in self.paramDict:
+    #         self.paramDict["return_cost"]=False
+    #     return_cost = self.paramDict["return_cost"]
+
+    #     # if "calculate_matched_signals" not in self.paramDict:
+    #     #     self.paramDict["calculate_matched_signals"]=False
+    #     self.paramDict["calculate_matched_signals"]=True
+    #     calculate_matched_signals = self.paramDict["calculate_matched_signals"]
+
+    #     if "return_matched_signals" not in self.paramDict:
+    #         self.paramDict["return_matched_signals"]=False
+        
+
+    #     return_matched_signals = self.paramDict["return_matched_signals"]
+
+
+
+
+    #     if calculate_matched_signals:
+    #         return_cost=True
+
+    #     useGPU_dictsearch = self.paramDict["useGPU_dictsearch"]
+
+
+    #     # if pca and (type(dictfile)==dict):
+    #     #     pca_file = str.split(dictfile, ".dict")[0] + "_{}pca.pkl".format(threshold_pca)
+    #     #     pca_file_name = str.split(pca_file, "/")[-1]
+
+    #     # if type(dictfile)==str:
+    #     #     vars_file = str.split(dictfile, ".dict")[0] + "_vars.pkl".format(threshold_pca)
+    #     #     vars_file_name=str.split(vars_file,"/")[-1]
+    #     #     path=str.split(os.path.realpath(__file__),"/utils_mrf.py")[0]
+
+    #     # print(path)
+    #     # print(vars_file_name)
+
+
+    #     if signal is None:
+
+    #         if volumes.ndim > 2:
+                
+    #             all_signals = volumes[:, mask > 0]
+                
+    #         else:  # already masked
+    #             all_signals = volumes
+
+    #     else :
+    #         all_signals = signal
+    #         all_signals=all_signals.reshape(-1,1)
+
+    #     all_signals=all_signals.astype("complex64")
+    #     nb_signals=all_signals.shape[1]
+
+
+
+    #     del volumes
+
+    #     with open(dicofull_file, "rb") as file:
+    #             dicofull = pickle.load(file)
+
+    #     if volumes_type == "raw":
+            
+    #         mrfdict = dicofull["mrfdict"]
+    #         # mrfdict.load(dictfile, force=True)
+
+    #         keys = mrfdict.keys
+    #         array_water = mrfdict.values[:, :, 0]
+    #         array_fat = mrfdict.values[:, :, 1]
+    #         keys=np.array(keys)
+
+    #         del mrfdict
+    #     elif volumes_type=="singular":  # otherwise dictfile contains {"mrfdict":(s_w,s_f,keys),"mrfdict_light":(s_w_light,s_f_light,keys_light)}
+
+    #         array_water = dicofull["mrfdict_L0{}".format(threshold_pca)][0]
+    #         array_fat = dicofull["mrfdict_L0{}".format(threshold_pca)][1]
+    #         keys = dicofull["mrfdict_L0{}".format(threshold_pca)][2]
+            
+
+    #     if retained_timesteps is not None:
+    #         array_water = array_water[:, retained_timesteps]
+    #         array_fat = array_fat[:, retained_timesteps]
+        
+    #     ntimesteps_dico=array_water.shape[-1]
+
+    #     if not(ntimesteps_dico==ntimesteps):
+    #         raise ValueError("The dictionary and the incoming signal did not have the same number of timesteps: ntimesteps_dico {} != ntimesteps_signal {}".format(ntimesteps_dico,ntimesteps))
+
+
+
+    #     # if not(volumes_type=="raw")or("vars" not in dicofull.keys()) or ((pca) and ("pca_{}".format(threshold_pca) not in dicofull.keys())) or (calculate_matched_signals):
+
+    #         # print("Calculating unique dico signals")
+    #     array_water_unique, index_water_unique = np.unique(array_water, axis=0, return_inverse=True)
+    #     array_fat_unique, index_fat_unique = np.unique(array_fat, axis=0, return_inverse=True)
+
+
+    #     if not(volumes_type=="raw") or ("vars" not in dicofull.keys()):
+
+    #         var_w_total = np.sum(array_water_unique * array_water_unique.conj(), axis=1).real
+    #         var_f_total = np.sum(array_fat_unique * array_fat_unique.conj(), axis=1).real
+    #         sig_wf_total = np.sum(array_water_unique[index_water_unique] * array_fat_unique[index_fat_unique].conj(),
+    #                               axis=1).real
+    #         var_w_total = var_w_total[index_water_unique]
+    #         var_f_total = var_f_total[index_fat_unique]
+    #         var_w_total = np.reshape(var_w_total, (-1, 1))
+    #         var_f_total = np.reshape(var_f_total, (-1, 1))
+    #         sig_wf_total = np.reshape(sig_wf_total, (-1, 1))
+            
+    #         if volumes_type=="raw":
+    #             dicofull["vars"]=(var_w_total,var_f_total,sig_wf_total,index_water_unique,index_fat_unique)
+    #             with open(dicofull_file,"wb") as file:
+    #                 pickle.dump(dicofull,file)
+    #     else:
+    #         print("Loading var w / var f / sig wf")
+            
+    #         (var_w_total,var_f_total,sig_wf_total,index_water_unique,index_fat_unique)=dicofull["vars"]
+
+    #     if pca:
+    #         if not(volumes_type=="raw") or ("pca_{}".format(threshold_pca) not in dicofull.keys()):
+    #             pca_water = PCAComplex(n_components_=threshold_pca)
+    #             pca_fat = PCAComplex(n_components_=threshold_pca)
+
+    #             pca_water.fit(array_water_unique)
+    #             pca_fat.fit(array_fat_unique)
+
+    #             transformed_array_water_unique = pca_water.transform(array_water_unique)
+    #             transformed_array_fat_unique = pca_fat.transform(array_fat_unique)
+    #             if volumes_type=="raw":
+    #                 dicofull["pca_{}".format(threshold_pca)]=(pca_water,pca_fat,transformed_array_water_unique,transformed_array_fat_unique)    
+    #                 with open(dicofull_file,"wb") as file:
+    #                     pickle.dump(dicofull,file)
+                    
+    #         else:
+    #             print("Loading pca")
+    #             (pca_water, pca_fat, transformed_array_water_unique, transformed_array_fat_unique)=dicofull["pca_{}".format(threshold_pca)] 
+    #     else:
+    #         pca_water = None
+    #         pca_fat = None
+    #         transformed_array_water_unique = None
+    #         transformed_array_fat_unique = None
+
+
+
+    #     if useGPU_dictsearch:
+    #         var_w_total = cp.asarray(var_w_total)
+    #         var_f_total = cp.asarray(var_f_total)
+    #         sig_wf_total = cp.asarray(sig_wf_total)
+    #         keys=cp.asarray(keys)
+
+    #     values_results = []
+    #     keys_results = list(range(1))
+
+    #     print("Calculating optimal fat fraction and best pattern per signal")
+
+    #     if self.paramDict["clustering"]:
+    #         #Trick to avoid returning matched signals in the coarse dictionary matching step
+    #         return_matched_signals_backup=self.paramDict["return_matched_signals"]
+    #         self.paramDict["return_matched_signals"]=False
+
+    #         print("Preliminary dictionary matching for clustering")
+    #         all_maps_bc_cf_light = self.search_patterns_test_multi(dicofull_file,all_signals)
+
+    #         self.paramDict["return_matched_signals"] = return_matched_signals_backup
+
+    #         ind_high_ff = np.argwhere(all_maps_bc_cf_light[0][0]["ff"] >= threshold_ff)
+    #         ind_low_ff = np.argwhere(all_maps_bc_cf_light[0][0]["ff"] < threshold_ff)
+    #         all_maps_low_ff = np.array([all_maps_bc_cf_light[0][0][k][ind_low_ff] for k in list(all_maps_bc_cf_light[0][0].keys())[:-1]]).squeeze()
+    #         all_maps_high_ff = np.array([all_maps_bc_cf_light[0][0][k][ind_high_ff] for k in
+    #                                      list(all_maps_bc_cf_light[0][0].keys())[:-1]]).squeeze()
+            
+
+    #         # if matching one only signal 
+    #         if all_maps_low_ff.ndim == 1:
+    #             all_maps_low_ff = all_maps_low_ff.reshape(-1,1)
+
+    #         if all_maps_high_ff.ndim == 1:
+    #             all_maps_high_ff = all_maps_low_ff.reshape(-1,1)
+
+    #         unique_keys, labels = np.unique(all_maps_low_ff, axis=-1, return_inverse=True)
+    #         #nb_clusters = unique_keys.shape[-1]
+    #         unique_keys_high_ff, labels_high_ff = np.unique(all_maps_high_ff, axis=-1, return_inverse=True)
+
+
+
+    #         idx_max_all_unique = np.zeros(nb_signals)
+    #         alpha_optim = np.zeros(nb_signals)
+    #         if return_cost:
+    #             J_optim = np.zeros(nb_signals)
+    #             phase_optim = np.zeros(nb_signals)
+
+    #         if useGPU_dictsearch:
+    #             unique_keys=cp.asarray(unique_keys)
+    #             labels = cp.asarray(labels)
+    #             unique_keys_high_ff = cp.asarray(unique_keys_high_ff)
+    #             labels_high_ff = cp.asarray(labels_high_ff)
+
+    #         all_signals_low_ff = all_signals[:, ind_low_ff.flatten()]
+    #         all_signals_high_ff = all_signals[:, ind_high_ff.flatten()]
+
+    #         d_T1 = 400
+    #         d_fT1 = 101
+    #         d_B1 = 0.2
+    #         d_DF = 0.030  # 0.015
+
+    #         if return_cost:
+    #             idx_max_all_unique_low_ff, alpha_optim_low_ff,J_optim_low_ff,phase_optim_low_ff = match_signals_v2_clustered_on_dico(all_signals_low_ff,
+    #                                                                                                                                  keys, pca_water,
+    #                                                                                                                                  pca_fat,
+    #                                                                                                                                  transformed_array_water_unique,
+    #                                                                                                                                  transformed_array_fat_unique,
+    #                                                                                                                                  var_w_total,
+    #                                                                                                                                  var_f_total,
+    #                                                                                                                                  sig_wf_total,
+    #                                                                                                                                  index_water_unique,
+    #                                                                                                                                  index_fat_unique,
+    #                                                                                                                                  useGPU_dictsearch,
+    #                                                                                                                                  unique_keys, d_T1,
+    #                                                                                                                                  d_fT1,
+    #                                                                                                                                  d_B1, d_DF, labels,
+    #                                                                                                                                  split, False,return_cost=True)
+
+    #         else:
+    #             idx_max_all_unique_low_ff,alpha_optim_low_ff=match_signals_v2_clustered_on_dico(all_signals_low_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
+    #                                                                                             transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
+    #                                                                                             index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys, d_T1, d_fT1,
+    #                                                                                             d_B1, d_DF, labels,split,False)
+
+    #         d_T1 = 400
+    #         d_fT1 = 101
+    #         d_B1 = 0.2
+    #         d_DF = 0.030  # 0.015
+
+
+    #         if return_cost:
+    #             idx_max_all_unique_high_ff, alpha_optim_high_ff,J_optim_high_ff,phase_optim_high_ff = match_signals_v2_clustered_on_dico(
+    #                 all_signals_high_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
+    #                 transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
+    #                 index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys_high_ff, d_T1, d_fT1,
+    #                 d_B1, d_DF, labels_high_ff, split, True,return_cost=True)
+    #         else:
+    #             idx_max_all_unique_high_ff,alpha_optim_high_ff=match_signals_v2_clustered_on_dico(all_signals_high_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
+    #                                                                                               transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
+    #                                                                                               index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys_high_ff, d_T1, d_fT1,
+    #                                                                                               d_B1, d_DF, labels_high_ff,split,True)
+
+
+
+    #         idx_max_all_unique[ind_low_ff.flatten()] = idx_max_all_unique_low_ff
+    #         idx_max_all_unique[ind_high_ff.flatten()] = idx_max_all_unique_high_ff
+
+    #         alpha_optim[ind_low_ff.flatten()] = alpha_optim_low_ff
+    #         alpha_optim[ind_high_ff.flatten()] = alpha_optim_high_ff
+
+    #         if return_cost:
+    #             J_optim[ind_low_ff.flatten()] = J_optim_low_ff
+    #             J_optim[ind_high_ff.flatten()] = J_optim_high_ff
+
+    #             phase_optim[ind_low_ff.flatten()] = phase_optim_low_ff
+    #             phase_optim[ind_high_ff.flatten()] = phase_optim_high_ff
+    #             matched_signals = array_water_unique[index_water_unique, :][idx_max_all_unique.astype(int), :].T * (
+    #                     1 - np.array(alpha_optim)).reshape(1, -1) + array_fat_unique[index_fat_unique, :][
+    #                                                                 idx_max_all_unique.astype(int),
+    #                                                                 :].T * np.array(alpha_optim).reshape(1, -1)
+    #             rho_optim= J_optim*np.linalg.norm(all_signals,axis=0)/np.linalg.norm(matched_signals, axis=0)
+    #             np.save("rho_optim.npy", rho_optim)
+
+    #         if calculate_matched_signals:
+    #             matched_signals=array_water_unique[index_water_unique, :][idx_max_all_unique.astype(int), :].T * (1 - np.array(alpha_optim)).reshape(1, -1) + array_fat_unique[index_fat_unique, :][idx_max_all_unique.astype(int), :].T * np.array(alpha_optim).reshape(1, -1)
+    #             matched_signals *=np.linalg.norm(all_signals,axis=0)/np.linalg.norm(matched_signals, axis=0)
+    #             matched_signals *= J_optim * np.exp(1j * phase_optim)
+    #             np.save("matched_signals_coarse_dico.npy", matched_signals)
+    #             print("Matched signals saved to matched_signals_coarse_dico.npy")
+
+
+
+    #         if useGPU_dictsearch:
+    #             keys=keys.get()
+
+    #         keys_for_map = [tuple(k) for k in keys]
+
+    #         params_all_unique = np.array(
+    #             [keys_for_map[idx] + (alpha_optim[l],) for l, idx in enumerate(idx_max_all_unique.astype(int))])
+            
+    #         map_rebuilt = {
+    #             "wT1": params_all_unique[:, 0],
+    #             "fT1": params_all_unique[:, 1],
+    #             "attB1": params_all_unique[:, 2],
+    #             "df": params_all_unique[:, 3],
+    #             "ff": params_all_unique[:, 4]
+
+    #         }
+    #         if return_cost:
+    #             if not(return_matched_signals):
+    #                 values_results.append((map_rebuilt, mask,J_optim,phase_optim,rho_optim))
+    #             else:
+    #                 values_results.append((map_rebuilt, mask,J_optim,phase_optim,rho_optim,matched_signals))
+    #         else:
+    #             values_results.append((map_rebuilt, mask))
+
+    #     else:
+    #         #Trick to avoid returning matched signals in the coarse dictionary matching step
+    #         return_matched_signals_backup=self.paramDict["return_matched_signals"]
+
+
+
+    #         if calculate_matched_signals:
+    #             all_maps,matched_signals = self.search_patterns_test_multi(dicofull_file,all_signals)
+
+    #         else:
+    #             all_maps = self.search_patterns_test_multi(dicofull_file,all_signals)
+
+    #         map_rebuilt=all_maps[0][0]
+    #         mask=all_maps[0][1]
+
+    #         if return_cost:
+    #             if not(return_matched_signals):
+    #                 values_results.append((map_rebuilt, mask,None,None))
+    #             else:
+    #                 values_results.append((map_rebuilt, mask,None,None,matched_signals))
+    #         else:
+    #             values_results.append((map_rebuilt, mask))
+
+    #     print("Maps built")
+
+    #     return dict(zip(keys_results, values_results))
+
+
+    def search_patterns_test_multi_2_steps_dico(self, dicofull_file, volumes, signal=None, retained_timesteps=None, with_FF=False):
 
         if self.mask is None:
             mask = build_mask_from_volume(volumes)
@@ -1086,7 +1699,7 @@ class SimpleDictSearch(Optimizer):
         # dictfile_light=self.paramDict["dictfile_light"]
 
         if "return_cost" not in self.paramDict:
-            self.paramDict["return_cost"]=False
+            self.paramDict["return_cost"]=True
         return_cost = self.paramDict["return_cost"]
 
         # if "calculate_matched_signals" not in self.paramDict:
@@ -1095,7 +1708,7 @@ class SimpleDictSearch(Optimizer):
         calculate_matched_signals = self.paramDict["calculate_matched_signals"]
 
         if "return_matched_signals" not in self.paramDict:
-            self.paramDict["return_matched_signals"]=False
+            self.paramDict["return_matched_signals"]=True
         
 
         return_matched_signals = self.paramDict["return_matched_signals"]
@@ -1125,9 +1738,11 @@ class SimpleDictSearch(Optimizer):
         if signal is None:
 
             if volumes.ndim > 2:
+                print(mask.shape)
+                print(volumes.shape)
                 
                 all_signals = volumes[:, mask > 0]
-                
+
             else:  # already masked
                 all_signals = volumes
 
@@ -1146,270 +1761,325 @@ class SimpleDictSearch(Optimizer):
                 dicofull = pickle.load(file)
 
         if volumes_type == "raw":
-            
+
             mrfdict = dicofull["mrfdict"]
             # mrfdict.load(dictfile, force=True)
-
             keys = mrfdict.keys
-            array_water = mrfdict.values[:, :, 0]
-            array_fat = mrfdict.values[:, :, 1]
             keys=np.array(keys)
 
+            if with_FF is True:
+                array_water_fat = mrfdict.values[:, :, 0]
+
+            else:
+                array_water = mrfdict.values[:, :, 0]
+                array_fat = mrfdict.values[:, :, 1]
+            
             del mrfdict
+
         elif volumes_type=="singular":  # otherwise dictfile contains {"mrfdict":(s_w,s_f,keys),"mrfdict_light":(s_w_light,s_f_light,keys_light)}
 
-            array_water = dicofull["mrfdict_L0{}".format(threshold_pca)][0]
-            array_fat = dicofull["mrfdict_L0{}".format(threshold_pca)][1]
-            keys = dicofull["mrfdict_L0{}".format(threshold_pca)][2]
-            
+            if with_FF is True:
+                array_water_fat = dicofull["mrfdict_L0{}".format(threshold_pca)][0]
+                keys = dicofull["mrfdict_L0{}".format(threshold_pca)][1]
+            else :
+                array_water = dicofull["mrfdict_L0{}".format(threshold_pca)][0]
+                array_fat = dicofull["mrfdict_L0{}".format(threshold_pca)][1]
+                keys = dicofull["mrfdict_L0{}".format(threshold_pca)][2]
+
 
         if retained_timesteps is not None:
-            array_water = array_water[:, retained_timesteps]
-            array_fat = array_fat[:, retained_timesteps]
+
+            if with_FF is True:
+                array_water_fat = array_water_fat[:,retained_timesteps]
+            else :
+                array_water = array_water[:, retained_timesteps]
+                array_fat = array_fat[:, retained_timesteps]
         
-        ntimesteps_dico=array_water.shape[-1]
+        if with_FF is True:
+            ntimesteps_dico=array_water_fat.shape[-1]
+        else :
+            ntimesteps_dico=array_water.shape[-1]
 
         if not(ntimesteps_dico==ntimesteps):
             raise ValueError("The dictionary and the incoming signal did not have the same number of timesteps: ntimesteps_dico {} != ntimesteps_signal {}".format(ntimesteps_dico,ntimesteps))
 
+        if with_FF is True: # if FF is already in keys 
 
+                print("Dictionary matching with FF in keys (pre-combined signals)")
+                
+                map_rebuilt, matched_signals_out = match_signals_v2_with_FF_in_keys(
+                    all_signals,
+                    array_water_fat,  # Pre-combined signals with FF
+                    keys,
+                    split=split,
+                    useGPU_dictsearch=useGPU_dictsearch,
+                    return_matched_signals=True
+                )
 
+                values_results = []
+                keys_results = list(range(1))
+                
+                # Reshape matched_signals to (n_timepoints, n_signals) if needed
+                if matched_signals_out.ndim == 1:
+                    matched_signals_out = matched_signals_out.reshape(-1, 1)
+                
+                # Calculate cost metrics if requested
+                if return_cost:
+                    correlation = np.abs(np.sum(all_signals.conj() * matched_signals_out, axis=0))
+                    J_optim = correlation / (np.linalg.norm(all_signals, axis=0) * np.linalg.norm(matched_signals_out, axis=0) + 1e-10)
+                    phase_optim = np.angle(np.sum(all_signals.conj() * matched_signals_out, axis=0))
+                    rho_optim = J_optim * np.linalg.norm(all_signals, axis=0) / (np.linalg.norm(matched_signals_out, axis=0) + 1e-10)
+                else:
+                    J_optim = None
+                    phase_optim = None
+                    rho_optim = None
+                
+                # Build output with proper structure
+                if calculate_matched_signals:
+                    matched_signals = matched_signals_out
+                
+                if return_cost:
+                    if not(return_matched_signals):
+                        values_results.append((map_rebuilt, mask, J_optim, phase_optim, rho_optim))
+                    else:
+                        values_results.append((map_rebuilt, mask, J_optim, phase_optim, rho_optim, matched_signals_out))
+                else:
+                    values_results.append((map_rebuilt, mask))
+                
+                print("Maps built")
+                return dict(zip(keys_results, values_results))
+
+        else : 
         # if not(volumes_type=="raw")or("vars" not in dicofull.keys()) or ((pca) and ("pca_{}".format(threshold_pca) not in dicofull.keys())) or (calculate_matched_signals):
 
             # print("Calculating unique dico signals")
-        array_water_unique, index_water_unique = np.unique(array_water, axis=0, return_inverse=True)
-        array_fat_unique, index_fat_unique = np.unique(array_fat, axis=0, return_inverse=True)
+            array_water_unique, index_water_unique = np.unique(array_water, axis=0, return_inverse=True)
+            array_fat_unique, index_fat_unique = np.unique(array_fat, axis=0, return_inverse=True)
 
 
-        if not(volumes_type=="raw") or ("vars" not in dicofull.keys()):
+            if not(volumes_type=="raw") or ("vars" not in dicofull.keys()):
 
-            var_w_total = np.sum(array_water_unique * array_water_unique.conj(), axis=1).real
-            var_f_total = np.sum(array_fat_unique * array_fat_unique.conj(), axis=1).real
-            sig_wf_total = np.sum(array_water_unique[index_water_unique] * array_fat_unique[index_fat_unique].conj(),
-                                  axis=1).real
-            var_w_total = var_w_total[index_water_unique]
-            var_f_total = var_f_total[index_fat_unique]
-            var_w_total = np.reshape(var_w_total, (-1, 1))
-            var_f_total = np.reshape(var_f_total, (-1, 1))
-            sig_wf_total = np.reshape(sig_wf_total, (-1, 1))
-            
-            if volumes_type=="raw":
-                dicofull["vars"]=(var_w_total,var_f_total,sig_wf_total,index_water_unique,index_fat_unique)
-                with open(dicofull_file,"wb") as file:
-                    pickle.dump(dicofull,file)
-        else:
-            print("Loading var w / var f / sig wf")
-            
-            (var_w_total,var_f_total,sig_wf_total,index_water_unique,index_fat_unique)=dicofull["vars"]
-
-        if pca:
-            if not(volumes_type=="raw") or ("pca_{}".format(threshold_pca) not in dicofull.keys()):
-                pca_water = PCAComplex(n_components_=threshold_pca)
-                pca_fat = PCAComplex(n_components_=threshold_pca)
-
-                pca_water.fit(array_water_unique)
-                pca_fat.fit(array_fat_unique)
-
-                transformed_array_water_unique = pca_water.transform(array_water_unique)
-                transformed_array_fat_unique = pca_fat.transform(array_fat_unique)
+                var_w_total = np.sum(array_water_unique * array_water_unique.conj(), axis=1).real
+                var_f_total = np.sum(array_fat_unique * array_fat_unique.conj(), axis=1).real
+                sig_wf_total = np.sum(array_water_unique[index_water_unique] * array_fat_unique[index_fat_unique].conj(),
+                                    axis=1).real
+                var_w_total = var_w_total[index_water_unique]
+                var_f_total = var_f_total[index_fat_unique]
+                var_w_total = np.reshape(var_w_total, (-1, 1))
+                var_f_total = np.reshape(var_f_total, (-1, 1))
+                sig_wf_total = np.reshape(sig_wf_total, (-1, 1))
+                
                 if volumes_type=="raw":
-                    dicofull["pca_{}".format(threshold_pca)]=(pca_water,pca_fat,transformed_array_water_unique,transformed_array_fat_unique)    
+                    dicofull["vars"]=(var_w_total,var_f_total,sig_wf_total,index_water_unique,index_fat_unique)
                     with open(dicofull_file,"wb") as file:
                         pickle.dump(dicofull,file)
+            else:
+                print("Loading var w / var f / sig wf")
+                
+                (var_w_total,var_f_total,sig_wf_total,index_water_unique,index_fat_unique)=dicofull["vars"]
+
+            if pca:
+                if not(volumes_type=="raw") or ("pca_{}".format(threshold_pca) not in dicofull.keys()):
+                    pca_water = PCAComplex(n_components_=threshold_pca)
+                    pca_fat = PCAComplex(n_components_=threshold_pca)
+
+                    pca_water.fit(array_water_unique)
+                    pca_fat.fit(array_fat_unique)
+
+                    transformed_array_water_unique = pca_water.transform(array_water_unique)
+                    transformed_array_fat_unique = pca_fat.transform(array_fat_unique)
+                    if volumes_type=="raw":
+                        dicofull["pca_{}".format(threshold_pca)]=(pca_water,pca_fat,transformed_array_water_unique,transformed_array_fat_unique)    
+                        with open(dicofull_file,"wb") as file:
+                            pickle.dump(dicofull,file)
+                        
+                else:
+                    print("Loading pca")
+                    (pca_water, pca_fat, transformed_array_water_unique, transformed_array_fat_unique)=dicofull["pca_{}".format(threshold_pca)] 
+            else:
+                pca_water = None
+                pca_fat = None
+                transformed_array_water_unique = None
+                transformed_array_fat_unique = None
+
+
+
+            if useGPU_dictsearch:
+                var_w_total = cp.asarray(var_w_total)
+                var_f_total = cp.asarray(var_f_total)
+                sig_wf_total = cp.asarray(sig_wf_total)
+                keys=cp.asarray(keys)
+
+            values_results = []
+            keys_results = list(range(1))
+
+            print("Calculating optimal fat fraction and best pattern per signal")
+
+            if with_FF is False : 
+                if self.paramDict["clustering"]:
+                    #Trick to avoid returning matched signals in the coarse dictionary matching step
+                    return_matched_signals_backup=self.paramDict["return_matched_signals"]
+                    self.paramDict["return_matched_signals"]=False
+
+                    print("Preliminary dictionary matching for clustering")
+                    all_maps_bc_cf_light = self.search_patterns_test_multi(dicofull_file,all_signals)
+                    np.save('all_maps_bc_cf_light.pkl',all_maps_bc_cf_light)
+                    self.paramDict["return_matched_signals"] = return_matched_signals_backup
+                    ind_high_ff = np.argwhere(all_maps_bc_cf_light[0][0]["ff"] >= threshold_ff)
+                    ind_low_ff = np.argwhere(all_maps_bc_cf_light[0][0]["ff"] < threshold_ff)
+                    all_maps_low_ff = np.array([all_maps_bc_cf_light[0][0][k][ind_low_ff] for k in list(all_maps_bc_cf_light[0][0].keys())[:-1]]).squeeze()
+                    all_maps_high_ff = np.array([all_maps_bc_cf_light[0][0][k][ind_high_ff] for k in
+                                                list(all_maps_bc_cf_light[0][0].keys())[:-1]]).squeeze()
+                
+
+                    # if matching one only signal 
+                    if all_maps_low_ff.ndim == 1:
+                        all_maps_low_ff = all_maps_low_ff.reshape(-1,1)
+
+                    if all_maps_high_ff.ndim == 1:
+                        all_maps_high_ff = all_maps_low_ff.reshape(-1,1)
+
+                    unique_keys, labels = np.unique(all_maps_low_ff, axis=-1, return_inverse=True)
+                    #nb_clusters = unique_keys.shape[-1]
+                    unique_keys_high_ff, labels_high_ff = np.unique(all_maps_high_ff, axis=-1, return_inverse=True)
+                
+                    idx_max_all_unique = np.zeros(nb_signals)
+                    alpha_optim = np.zeros(nb_signals)
+                    if return_cost:
+                        J_optim = np.zeros(nb_signals)
+                        phase_optim = np.zeros(nb_signals)
+
+                    if useGPU_dictsearch:
+                        unique_keys=cp.asarray(unique_keys)
+                        labels = cp.asarray(labels)
+                        unique_keys_high_ff = cp.asarray(unique_keys_high_ff)
+                        labels_high_ff = cp.asarray(labels_high_ff)
+
+                    all_signals_low_ff = all_signals[:, ind_low_ff.flatten()]
+                    all_signals_high_ff = all_signals[:, ind_high_ff.flatten()]
+
+                    d_T1 = 800
+                    d_fT1 = 101
+                    d_B1 = 0.5
+                    d_DF = 0.030  # 0.015
+                    # d_DF = 0.0058
+
+                    if return_cost:
+                        idx_max_all_unique_low_ff, alpha_optim_low_ff,J_optim_low_ff,phase_optim_low_ff = match_signals_v2_clustered_on_dico(all_signals_low_ff,
+                                                                                                                                            keys, pca_water,
+                                                                                                                                            pca_fat,
+                                                                                                                                            transformed_array_water_unique,
+                                                                                                                                            transformed_array_fat_unique,
+                                                                                                                                            var_w_total,
+                                                                                                                                            var_f_total,
+                                                                                                                                            sig_wf_total,
+                                                                                                                                            index_water_unique,
+                                                                                                                                            index_fat_unique,
+                                                                                                                                            useGPU_dictsearch,
+                                                                                                                                            unique_keys, d_T1,
+                                                                                                                                            d_fT1,
+                                                                                                                                            d_B1, d_DF, labels,
+                                                                                                                                            split, False,return_cost=True)
+
+                    else:
+                        idx_max_all_unique_low_ff,alpha_optim_low_ff=match_signals_v2_clustered_on_dico(all_signals_low_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
+                                                                                                        transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
+                                                                                                        index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys, d_T1, d_fT1,
+                                                                                                        d_B1, d_DF, labels,split,False)
+
+                    d_T1 = 800
+                    d_fT1 = 101
+                    d_B1 = 0.5
+                    d_DF = 0.030  # 0.015
+                    # d_DF = 0.0058
+
+                    if return_cost:
+                        idx_max_all_unique_high_ff, alpha_optim_high_ff,J_optim_high_ff,phase_optim_high_ff = match_signals_v2_clustered_on_dico(
+                            all_signals_high_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
+                            transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
+                            index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys_high_ff, d_T1, d_fT1,
+                            d_B1, d_DF, labels_high_ff, split, True,return_cost=True)
+                    else:
+                        idx_max_all_unique_high_ff,alpha_optim_high_ff=match_signals_v2_clustered_on_dico(all_signals_high_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
+                                                                                                        transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
                     
-            else:
-                print("Loading pca")
-                (pca_water, pca_fat, transformed_array_water_unique, transformed_array_fat_unique)=dicofull["pca_{}".format(threshold_pca)] 
-        else:
-            pca_water = None
-            pca_fat = None
-            transformed_array_water_unique = None
-            transformed_array_fat_unique = None
+                                                                                                        index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys_high_ff, d_T1, d_fT1,
+                                                                                                        d_B1, d_DF, labels_high_ff,split,True)
+
+                    idx_max_all_unique[ind_low_ff.flatten()] = idx_max_all_unique_low_ff
+                    idx_max_all_unique[ind_high_ff.flatten()] = idx_max_all_unique_high_ff
+
+                    alpha_optim[ind_low_ff.flatten()] = alpha_optim_low_ff
+                    alpha_optim[ind_high_ff.flatten()] = alpha_optim_high_ff
+
+                    if return_cost:
+                        J_optim[ind_low_ff.flatten()] = J_optim_low_ff
+                        J_optim[ind_high_ff.flatten()] = J_optim_high_ff
+
+                        phase_optim[ind_low_ff.flatten()] = phase_optim_low_ff
+                        phase_optim[ind_high_ff.flatten()] = phase_optim_high_ff
+                        matched_signals = array_water_unique[index_water_unique, :][idx_max_all_unique.astype(int), :].T * (
+                                1 - np.array(alpha_optim)).reshape(1, -1) + array_fat_unique[index_fat_unique, :][
+                                                                            idx_max_all_unique.astype(int),
+                                                                            :].T * np.array(alpha_optim).reshape(1, -1)
+                        rho_optim= J_optim*np.linalg.norm(all_signals,axis=0)/np.linalg.norm(matched_signals, axis=0)
+
+                    if calculate_matched_signals:
+                        matched_signals=array_water_unique[index_water_unique, :][idx_max_all_unique.astype(int), :].T * (1 - np.array(alpha_optim)).reshape(1, -1) + array_fat_unique[index_fat_unique, :][idx_max_all_unique.astype(int), :].T * np.array(alpha_optim).reshape(1, -1)
+                        matched_signals *=np.linalg.norm(all_signals,axis=0)/np.linalg.norm(matched_signals, axis=0)
+                        matched_signals *= J_optim * np.exp(1j * phase_optim)
 
 
 
-        if useGPU_dictsearch:
-            var_w_total = cp.asarray(var_w_total)
-            var_f_total = cp.asarray(var_f_total)
-            sig_wf_total = cp.asarray(sig_wf_total)
-            keys=cp.asarray(keys)
+                    if useGPU_dictsearch:
+                        keys=keys.get()
 
-        values_results = []
-        keys_results = list(range(1))
+                    keys_for_map = [tuple(k) for k in keys]
 
-        print("Calculating optimal fat fraction and best pattern per signal")
+                    params_all_unique = np.array(
+                        [keys_for_map[idx] + (alpha_optim[l],) for l, idx in enumerate(idx_max_all_unique.astype(int))])
+                    
+                    np.save("/home/ahelleboid/Low_field_MRF/mrftools/data/055T_calculated_FF/alpha_optim.npy", alpha_optim)
+                    map_rebuilt = {
+                        "wT1": params_all_unique[:, 0],
+                        "fT1": params_all_unique[:, 1],
+                        "attB1": params_all_unique[:, 2],
+                        "df": params_all_unique[:, 3],
+                        "ff": params_all_unique[:, 4]
 
-        if self.paramDict["clustering"]:
-            #Trick to avoid returning matched signals in the coarse dictionary matching step
-            return_matched_signals_backup=self.paramDict["return_matched_signals"]
-            self.paramDict["return_matched_signals"]=False
+                    }
+                    if return_cost:
+                        if not(return_matched_signals):
+                            values_results.append((map_rebuilt, mask,J_optim,phase_optim,rho_optim))
+                        else:
+                            values_results.append((map_rebuilt, mask,J_optim,phase_optim,rho_optim,matched_signals))
+                    else:
+                        values_results.append((map_rebuilt, mask))
 
-            print("Preliminary dictionary matching for clustering")
-            all_maps_bc_cf_light = self.search_patterns_test_multi(dicofull_file,all_signals)
-
-            self.paramDict["return_matched_signals"] = return_matched_signals_backup
-
-            ind_high_ff = np.argwhere(all_maps_bc_cf_light[0][0]["ff"] >= threshold_ff)
-            ind_low_ff = np.argwhere(all_maps_bc_cf_light[0][0]["ff"] < threshold_ff)
-            all_maps_low_ff = np.array([all_maps_bc_cf_light[0][0][k][ind_low_ff] for k in list(all_maps_bc_cf_light[0][0].keys())[:-1]]).squeeze()
-            all_maps_high_ff = np.array([all_maps_bc_cf_light[0][0][k][ind_high_ff] for k in
-                                         list(all_maps_bc_cf_light[0][0].keys())[:-1]]).squeeze()
-            
-
-            # if matching one only signal 
-            if all_maps_low_ff.ndim == 1:
-                all_maps_low_ff = all_maps_low_ff.reshape(-1,1)
-
-            if all_maps_high_ff.ndim == 1:
-                all_maps_high_ff = all_maps_low_ff.reshape(-1,1)
-
-            unique_keys, labels = np.unique(all_maps_low_ff, axis=-1, return_inverse=True)
-            #nb_clusters = unique_keys.shape[-1]
-            unique_keys_high_ff, labels_high_ff = np.unique(all_maps_high_ff, axis=-1, return_inverse=True)
-
-
-
-            idx_max_all_unique = np.zeros(nb_signals)
-            alpha_optim = np.zeros(nb_signals)
-            if return_cost:
-                J_optim = np.zeros(nb_signals)
-                phase_optim = np.zeros(nb_signals)
-
-            if useGPU_dictsearch:
-                unique_keys=cp.asarray(unique_keys)
-                labels = cp.asarray(labels)
-                unique_keys_high_ff = cp.asarray(unique_keys_high_ff)
-                labels_high_ff = cp.asarray(labels_high_ff)
-
-            all_signals_low_ff = all_signals[:, ind_low_ff.flatten()]
-            all_signals_high_ff = all_signals[:, ind_high_ff.flatten()]
-
-            d_T1 = 400
-            d_fT1 = 101
-            d_B1 = 0.2
-            d_DF = 0.030  # 0.015
-
-            if return_cost:
-                idx_max_all_unique_low_ff, alpha_optim_low_ff,J_optim_low_ff,phase_optim_low_ff = match_signals_v2_clustered_on_dico(all_signals_low_ff,
-                                                                                                                                     keys, pca_water,
-                                                                                                                                     pca_fat,
-                                                                                                                                     transformed_array_water_unique,
-                                                                                                                                     transformed_array_fat_unique,
-                                                                                                                                     var_w_total,
-                                                                                                                                     var_f_total,
-                                                                                                                                     sig_wf_total,
-                                                                                                                                     index_water_unique,
-                                                                                                                                     index_fat_unique,
-                                                                                                                                     useGPU_dictsearch,
-                                                                                                                                     unique_keys, d_T1,
-                                                                                                                                     d_fT1,
-                                                                                                                                     d_B1, d_DF, labels,
-                                                                                                                                     split, False,return_cost=True)
-
-            else:
-                idx_max_all_unique_low_ff,alpha_optim_low_ff=match_signals_v2_clustered_on_dico(all_signals_low_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
-                                                                                                transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
-                                                                                                index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys, d_T1, d_fT1,
-                                                                                                d_B1, d_DF, labels,split,False)
-
-            d_T1 = 400
-            d_fT1 = 101
-            d_B1 = 0.2
-            d_DF = 0.030  # 0.015
-
-
-            if return_cost:
-                idx_max_all_unique_high_ff, alpha_optim_high_ff,J_optim_high_ff,phase_optim_high_ff = match_signals_v2_clustered_on_dico(
-                    all_signals_high_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
-                    transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
-                    index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys_high_ff, d_T1, d_fT1,
-                    d_B1, d_DF, labels_high_ff, split, True,return_cost=True)
-            else:
-                idx_max_all_unique_high_ff,alpha_optim_high_ff=match_signals_v2_clustered_on_dico(all_signals_high_ff, keys, pca_water, pca_fat, transformed_array_water_unique,
-                                                                                                  transformed_array_fat_unique, var_w_total, var_f_total, sig_wf_total,
-                                                                                                  index_water_unique, index_fat_unique, useGPU_dictsearch, unique_keys_high_ff, d_T1, d_fT1,
-                                                                                                  d_B1, d_DF, labels_high_ff,split,True)
-
-
-
-            idx_max_all_unique[ind_low_ff.flatten()] = idx_max_all_unique_low_ff
-            idx_max_all_unique[ind_high_ff.flatten()] = idx_max_all_unique_high_ff
-
-            alpha_optim[ind_low_ff.flatten()] = alpha_optim_low_ff
-            alpha_optim[ind_high_ff.flatten()] = alpha_optim_high_ff
-
-            if return_cost:
-                J_optim[ind_low_ff.flatten()] = J_optim_low_ff
-                J_optim[ind_high_ff.flatten()] = J_optim_high_ff
-
-                phase_optim[ind_low_ff.flatten()] = phase_optim_low_ff
-                phase_optim[ind_high_ff.flatten()] = phase_optim_high_ff
-                matched_signals = array_water_unique[index_water_unique, :][idx_max_all_unique.astype(int), :].T * (
-                        1 - np.array(alpha_optim)).reshape(1, -1) + array_fat_unique[index_fat_unique, :][
-                                                                    idx_max_all_unique.astype(int),
-                                                                    :].T * np.array(alpha_optim).reshape(1, -1)
-                rho_optim= J_optim*np.linalg.norm(all_signals,axis=0)/np.linalg.norm(matched_signals, axis=0)
-                np.save("rho_optim.npy", rho_optim)
-
-            if calculate_matched_signals:
-                matched_signals=array_water_unique[index_water_unique, :][idx_max_all_unique.astype(int), :].T * (1 - np.array(alpha_optim)).reshape(1, -1) + array_fat_unique[index_fat_unique, :][idx_max_all_unique.astype(int), :].T * np.array(alpha_optim).reshape(1, -1)
-                matched_signals *=np.linalg.norm(all_signals,axis=0)/np.linalg.norm(matched_signals, axis=0)
-                matched_signals *= J_optim * np.exp(1j * phase_optim)
-                np.save("matched_signals_coarse_dico.npy", matched_signals)
-                print("Matched signals saved to matched_signals_coarse_dico.npy")
-
-
-
-            if useGPU_dictsearch:
-                keys=keys.get()
-
-            keys_for_map = [tuple(k) for k in keys]
-
-            params_all_unique = np.array(
-                [keys_for_map[idx] + (alpha_optim[l],) for l, idx in enumerate(idx_max_all_unique.astype(int))])
-            
-            map_rebuilt = {
-                "wT1": params_all_unique[:, 0],
-                "fT1": params_all_unique[:, 1],
-                "attB1": params_all_unique[:, 2],
-                "df": params_all_unique[:, 3],
-                "ff": params_all_unique[:, 4]
-
-            }
-            if return_cost:
-                if not(return_matched_signals):
-                    values_results.append((map_rebuilt, mask,J_optim,phase_optim,rho_optim))
                 else:
-                    values_results.append((map_rebuilt, mask,J_optim,phase_optim,rho_optim,matched_signals))
-            else:
-                values_results.append((map_rebuilt, mask))
+                    #Trick to avoid returning matched signals in the coarse dictionary matching step
+                    return_matched_signals_backup=self.paramDict["return_matched_signals"]
 
-        else:
-            #Trick to avoid returning matched signals in the coarse dictionary matching step
-            return_matched_signals_backup=self.paramDict["return_matched_signals"]
+                    if calculate_matched_signals:
+                        all_maps,matched_signals = self.search_patterns_test_multi(dicofull_file,all_signals)
 
+                    else:
+                        all_maps = self.search_patterns_test_multi(dicofull_file,all_signals)
 
+                    map_rebuilt=all_maps[0][0]
+                    mask=all_maps[0][1]
 
-            if calculate_matched_signals:
-                all_maps,matched_signals = self.search_patterns_test_multi(dicofull_file,all_signals)
+                    if return_cost:
+                        if not(return_matched_signals):
+                            values_results.append((map_rebuilt, mask,None,None))
+                        else:
+                            values_results.append((map_rebuilt, mask,None,None,matched_signals))
+                    else:
+                        values_results.append((map_rebuilt, mask))
 
-            else:
-                all_maps = self.search_patterns_test_multi(dicofull_file,all_signals)
+                print("Maps built")
 
-            map_rebuilt=all_maps[0][0]
-            mask=all_maps[0][1]
-
-            if return_cost:
-                if not(return_matched_signals):
-                    values_results.append((map_rebuilt, mask,None,None))
-                else:
-                    values_results.append((map_rebuilt, mask,None,None,matched_signals))
-            else:
-                values_results.append((map_rebuilt, mask))
-
-        print("Maps built")
-
-        return dict(zip(keys_results, values_results))
+                return dict(zip(keys_results, values_results))
 
 
 
@@ -1945,15 +2615,40 @@ def makevol(values, mask):
     return new
 
 
-def build_mask_from_volume(volumes,threshold_factor=0.05,iterations=2):
-    mask = False
-    unique = np.histogram(np.abs(volumes), 1000)[1]
-    mask = mask | (np.abs(volumes) > unique[int(len(unique) * threshold_factor)])
-    if iterations>0:
-        mask = safe_binary_closing(mask,iterations=iterations)
+# def build_mask_from_volume(volumes,threshold_factor=0.05,iterations=2):
+#     mask = False
+#     unique = np.histogram(np.abs(volumes), 1000)[1]
+#     mask = mask | (np.abs(volumes) > unique[int(len(unique) * threshold_factor)])
+#     if iterations>0:
+#         mask = safe_binary_closing(mask,iterations=iterations)
     
-    # print(mask.shape)
-    return mask*1
+#     # print(mask.shape)
+#     return mask*1
+
+def build_mask_from_volume(volumes, threshold_factor=0.05, iterations=2):
+
+    if volumes.ndim == 2:
+        volumes = volumes[np.newaxis, ...]
+
+    masks = []
+
+    for z in range(volumes.shape[0]):
+        vol = volumes[z]
+
+        unique = np.histogram(np.abs(vol), 1000)[1]
+        thresh = unique[int(len(unique) * threshold_factor)]
+
+        mask = np.abs(vol) > thresh
+
+        if iterations > 0:
+            mask = safe_binary_closing(mask, iterations=iterations)
+
+        masks.append(mask)
+
+    masks = np.array(masks)
+    masks=masks.squeeze()
+
+    return masks.astype(int)
 
 
 def safe_binary_closing(volume, structure=None, iterations=0):
@@ -2099,8 +2794,12 @@ def convertArrayToImageHelper(dico,data,apply_offset=False,reorient=True):
         origin[-1]=origin[-1]+offset
         origin=tuple(origin)
     
-
+    spacing = list(spacing)
+    spacing[-1] = max(spacing[-1], 1.0) #erreur spacing (2,2,0) sinon
+    spacing = tuple(spacing)
     geom={"origin":origin,"spacing":spacing}
+
+    print(spacing)
     # print(geom)
 
     if data.ndim==2:
@@ -2443,38 +3142,55 @@ def prox_LLR(volumes, threshold, blck, strd):
 
 
 
-def add_temporal_basis(dico,L0=None):
+def add_temporal_basis(dico,L0=None, with_FF=False):
     if "phi" not in dico.keys():
         print("Building temporal basis from dictionary")
         mrfdict=dico["mrfdict"]
-        phi=build_phi(mrfdict)
+        phi=build_phi(mrfdict, with_FF=with_FF)
         dico["phi"]=phi
 
     if (L0 is not None)and(("mrfdict_light_L0{}".format(L0) not in dico.keys())or("mrfdict_L0{}".format(L0) not in dico.keys())):
         phi=dico["phi"]
         print("Projecting dictionaries on subspace formed by first {} temporal components".format(L0))
-        dico=compress_dictionary(dico,phi,L0)
+        dico=compress_dictionary(dico,phi,L0, with_FF)
     return dico
     
 
 
-def compress_dictionary(dico,phi,L0):
-    phi=phi[:L0]
-    mrfdict=dico["mrfdict"]
-    keys = mrfdict.keys
-    array_water = mrfdict.values[:, :, 0]
-    array_fat = mrfdict.values[:, :, 1]
-    array_water_projected=array_water@phi.T.conj()
-    array_fat_projected=array_fat@phi.T.conj()
+def compress_dictionary(dico,phi,L0, with_FF=False):
 
-    mrfdict_light=dico["mrfdict_light"]
-    keys_light = mrfdict_light.keys
-    array_water = mrfdict_light.values[:, :, 0]
-    array_fat = mrfdict_light.values[:, :, 1]
-    array_water_light_projected=array_water@phi.T.conj()
-    array_fat_light_projected=array_fat@phi.T.conj()
+    if with_FF is True :
+        phi=phi[:L0]
+        mrfdict=dico["mrfdict"]
+        keys = mrfdict.keys
+        array_water_fat = mrfdict.values[:, :, 0]
+        array_water_fat_projected=array_water_fat@phi.T.conj()
 
-    dico["mrfdict_light_L0{}".format(L0)]=(array_water_light_projected,array_fat_light_projected,keys_light)
-    dico["mrfdict_L0{}".format(L0)]=(array_water_projected,array_fat_projected,keys)
+        mrfdict_light=dico["mrfdict_light"]
+        keys_light = mrfdict_light.keys
+        array_water_fat = mrfdict_light.values[:, :, 0]
+        array_water_fat_light_projected=array_water_fat@phi.T.conj()
+
+        dico["mrfdict_light_L0{}".format(L0)]=(array_water_fat_light_projected,keys_light)
+        dico["mrfdict_L0{}".format(L0)]=(array_water_fat_projected,keys)
+    else : 
+        phi=phi[:L0]
+        mrfdict=dico["mrfdict"]
+        keys = mrfdict.keys
+        array_water = mrfdict.values[:, :, 0]
+        array_fat = mrfdict.values[:, :, 1]
+        array_water_projected=array_water@phi.T.conj()
+        array_fat_projected=array_fat@phi.T.conj()
+
+        mrfdict_light=dico["mrfdict_light"]
+        keys_light = mrfdict_light.keys
+        array_water = mrfdict_light.values[:, :, 0]
+        array_fat = mrfdict_light.values[:, :, 1]
+        array_water_light_projected=array_water@phi.T.conj()
+        array_fat_light_projected=array_fat@phi.T.conj()
+
+        dico["mrfdict_light_L0{}".format(L0)]=(array_water_light_projected,array_fat_light_projected,keys_light)
+        dico["mrfdict_L0{}".format(L0)]=(array_water_projected,array_fat_projected,keys)
+        
     return dico
 

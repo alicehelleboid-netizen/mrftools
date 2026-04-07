@@ -278,7 +278,7 @@ def build_mask_from_singular_volume(volumes,l=0,threshold=0.03,it=1):
         outputs:
             mask: mask (nb slices x npoint x npoint)
     '''
-
+    print('blblbl',volumes.shape)
     volume=volumes[l]
     mask=build_mask_from_volume(volume,threshold,it)
     
@@ -315,7 +315,7 @@ def check_dico(dico_hdr, seqParams):
 
 
 
-def build_maps( volumes_all_slices,masks_all_slices,dico_full_file,signal,useGPU=True,split=100,return_cost=False,pca=6,volumes_type="raw"):
+def build_maps( volumes_all_slices,masks_all_slices,dico_full_file,signal,useGPU=True,split=100,return_cost=False,pca=6,volumes_type="raw", with_FF=False):
     '''
     builds MRF maps using bi-component dictionary matching (Slioussarenko et al. MRM 2024)
     inputs:
@@ -343,6 +343,7 @@ def build_maps( volumes_all_slices,masks_all_slices,dico_full_file,signal,useGPU
     '''
 
     print("volumes type : ", volumes_type)
+
     try:
         import cupy
     except:
@@ -352,7 +353,7 @@ def build_maps( volumes_all_slices,masks_all_slices,dico_full_file,signal,useGPU
     optimizer = SimpleDictSearch(mask=masks_all_slices, split=split, pca=True,
                                                 threshold_pca=pca,threshold_ff=0.9,return_cost=return_cost,useGPU_dictsearch=useGPU,volumes_type=volumes_type)
                 
-    all_maps=optimizer.search_patterns_test_multi_2_steps_dico(dico_full_file,volumes_all_slices, signal)
+    all_maps=optimizer.search_patterns_test_multi_2_steps_dico(dico_full_file,volumes_all_slices, signal, with_FF=with_FF)
         
 
     
@@ -397,9 +398,8 @@ def save_maps(all_maps, file_seqParams, keys = ["ff","wT1","attB1","df"]):
         map_all_slices = makevol(map_rebuilt[k], mask > 0)            
         map_all_slices,geom=convertArrayToImageHelper(dico_seqParams,map_all_slices,apply_offset=True)
         curr_volume=sitk.GetImageFromArray(map_all_slices)
-        
         curr_volume.SetSpacing(geom["spacing"])
-        print(geom["spacing"])
+        
         curr_volume.SetOrigin(geom["origin"])
         
         file_map=os.path.join(path,"{}_map.mha".format(k))
@@ -408,7 +408,7 @@ def save_maps(all_maps, file_seqParams, keys = ["ff","wT1","attB1","df"]):
 
 
 
-def generate_dictionaries(sequence_file,reco,min_TR_delay,dictconf,dictconf_light,TI=8.32, dest=None,diconame="dico",is_build_phi=False,L0=6):
+def generate_dictionaries(sequence_file,reco,min_TR_delay,dictconf,dictconf_light,TI=8.32, dest=None,diconame="dico",is_build_phi=False,L0=6, with_ff=False):
     '''
     Generates dictionaries from sequence and dico configuration files
     inputs:
@@ -431,8 +431,8 @@ def generate_dictionaries(sequence_file,reco,min_TR_delay,dictconf,dictconf_ligh
     _,FA_list,TE_list=load_sequence_file(sequence_file,reco,min_TR_delay/1000)
     seq_config=create_new_seq(FA_list,TE_list,min_TR_delay/1000,TI)
 
-    mrfdict,hdr,dictfile=generate_epg_dico_T1MRFSS_from_sequence(seq_config,dictconf,reco, dest=dest,prefix_dico="{}".format(diconame))
-    mrfdict_light,hdr_light,dictfile_light=generate_epg_dico_T1MRFSS_from_sequence(seq_config,dictconf_light,reco, dest=dest,prefix_dico="{}_light".format(diconame))
+    mrfdict,hdr,dictfile=generate_epg_dico_T1MRFSS_from_sequence(seq_config,dictconf,reco, dest=dest,prefix_dico="{}".format(diconame),with_ff=with_ff)
+    mrfdict_light,hdr_light,dictfile_light=generate_epg_dico_T1MRFSS_from_sequence(seq_config,dictconf_light,reco, dest=dest,prefix_dico="{}_light".format(diconame), with_ff=with_ff)
     
     dico_full_with_hdr={"hdr":hdr,
                         "hdr_light":hdr_light,
@@ -440,7 +440,7 @@ def generate_dictionaries(sequence_file,reco,min_TR_delay,dictconf,dictconf_ligh
                         "mrfdict_light":mrfdict_light}
     
     if is_build_phi:
-        dico_full_with_hdr=add_temporal_basis(dico_full_with_hdr,L0)
+        dico_full_with_hdr=add_temporal_basis(dico_full_with_hdr,L0, with_FF=with_ff)
             
 
 
