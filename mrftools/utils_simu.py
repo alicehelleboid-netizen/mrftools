@@ -12,6 +12,7 @@ from .dictmodel import Dictionary
 from tqdm import tqdm
 
 from mrftools.trajectory import Radial
+from mrftools.utils_mrf_simu import combine_mrf_dict_components
 # from mrftools.dictoptimizers import *
   
 def calculate_sensitivity_map(kdata,res=16,hanning_filter=True,density_adj=False):
@@ -158,7 +159,7 @@ def create_new_seq(FA_list,TE_list,min_TR_delay,TI,FA_factor=5):
 
     return seq_config_new
 
-def generate_epg_dico_T1MRFSS_from_sequence(sequence_config,filedictconf,recovery,rep=2,overwrite=True,sim_mode="mean",start=None,window=None, dest=None,prefix_dico="dico"):
+def generate_epg_dico_T1MRFSS_from_sequence(sequence_config,filedictconf,recovery,rep=2,overwrite=True,sim_mode="mean",start=None,window=None, dest=None,prefix_dico="dico", with_ff=False):
     if type(filedictconf)==str:
         with open(filedictconf) as f:
             dict_config = json.load(f)
@@ -175,7 +176,10 @@ def generate_epg_dico_T1MRFSS_from_sequence(sequence_config,filedictconf,recover
     fT2 = dict_config["fat_T2"]
     att = dict_config["B1_att"]
     df = dict_config["delta_freqs"]
-    df = [- value / 1000 for value in df]  # temp
+    df = [- value / 1000 for value in df]
+    if with_ff is True :
+        ff_list=dict_config["FF"]
+      # temp
     # df = np.linspace(-0.1, 0.1, 101)
 
     TR_total = np.sum(sequence_config["TR"])
@@ -243,13 +247,20 @@ def generate_epg_dico_T1MRFSS_from_sequence(sequence_config,filedictconf,recover
     water = np.array(water)
     fat = np.array(fat)
     # join water and fat
-    print("Build dictionary.")
+    print("Build dictionary.") 
     keys = list(itertools.product(wT1, fT1, att, df))
     values = np.stack(np.broadcast_arrays(water, fat), axis=-1)
     values = np.moveaxis(values.reshape(len(values), -1, 2), 0, 1)
+    
+    mrfdict = Dictionary(keys, values)
+
+    if with_ff is True :
+        print("adding FF")
+        signal_reshaped,keys_with_ff=combine_mrf_dict_components(mrfdict ,ff_list)
+        mrfdict = Dictionary(keys_with_ff, signal_reshaped)
 
     # print("Save dictionary.")
-    mrfdict = Dictionary(keys, values)
+    
     # mrfdict.save(dictfile, overwrite=overwrite)
     hdr={"sequence_config":sequence_config,"dict_config":dict_config,"recovery":recovery,"initial_repetitions":rep,"window":window,"sim_mode":sim_mode}
     return mrfdict,hdr,dictfile
@@ -474,3 +485,182 @@ def simulate_gen_eq_transverse(TR_list, FA_list, TE_list, df, T_1, T_2,B1, amp=n
     u = np.expand_dims(u_i[:-1], axis=-1)
     s_i = u * np.sin(np.array(FAs)) * E_2
     return s_i
+
+
+def convert_params_to_sequence_breaks_random_FA(params, min_TR_delay, spokes_count,num_breaks_TE,num_params_FA,
+                                                 bound_min_FA, bound_max_FA, inversion=True):
+    TE_ = np.zeros(spokes_count + 1)
+    # print(num_breaks_TE)
+    # print(num_breaks_FA)
+    TE_breaks = params[:num_breaks_TE].astype(int)
+    TE_breaks = [0] + list(np.cumsum(TE_breaks)) + [spokes_count]
+
+    TE_breaks=np.unique([te for te in TE_breaks if te<=spokes_count])
+    num_breaks_TE=len(TE_breaks)-2
+
+    print(TE_breaks)
+    # print(TE_breaks)
+    # print(FA_breaks)
+    for j in range(num_breaks_TE + 1):
+        TE_[(TE_breaks[j] + 1):(TE_breaks[j + 1] + 1)] = params[num_breaks_TE + j]
+
+    params_FA = params[(2*num_breaks_TE+1):(2*num_breaks_TE+1+num_params_FA)]
+    nb_params_FA = int(len(params_FA) / 2)
+    FA_ = generate_random_curve(spokes_count, params_FA[:int(nb_params_FA)], params_FA[int(nb_params_FA):],bound_min_FA,bound_max_FA)
+    FA_ = [np.pi] + list(FA_)
+
+    #TE_ = [0] + list(TE_)
+    TE_=list(TE_)
+
+    TR_ = np.zeros(spokes_count + 1)
+    TR_[0] = 8.32 / 1000
+
+    if not (inversion):
+        FA_[0] = 0
+        TR_[0] = 0
+
+    TR_[1:] = np.array(TE_[1:]) + min_TR_delay
+    TR_[-1] = TR_[-1] + params[-1]
+    TR_ = list(TR_)
+    return TR_, FA_, TE_
+
+
+def generate_random_curve(T, params_rho,params_phi,bound_min,bound_max):
+    #FA_bound_min = np.random.choice(np.arange(5, 16)) * np.pi / 180
+    #FA_bound_max = np.random.choice(np.arange(30, 60)) * np.pi / 180
+    H=len(params_rho)
+    rho = (params_rho * np.logspace(-0.5, -2.5, H)).reshape(-1, 1)
+    phi = (params_phi * 2 * np.pi).reshape(-1, 1)
+
+    t = np.arange(0, 2 * np.pi-np.pi/T, 2 * np.pi / T).reshape(1, -1)
+
+    traj = np.sum(rho * np.sin(np.arange(1, H + 1).reshape(-1, 1) @ t + phi), axis=0)
+    traj_min = np.min(traj)
+    traj_max = np.max(traj)
+
+    traj = (traj - traj_min) / (traj_max - traj_min) * (bound_max - bound_min) + bound_min
+
+    #traj = [np.pi] + list(FA_traj)
+
+    return traj
+
+
+def generate_param_list(nb_paliers, longueur_paliers, valeurs_paliers):
+    """
+    Génère une liste de TE avec des paliers définis.
+
+    Args:
+        nb_paliers (int) : nombre de paliers
+        longueur_paliers (list[int]) : longueur (nb d'éléments) de chaque palier
+        valeurs_paliers (list[float]) : valeur de TE pour chaque palier
+
+    Returns:
+        TE_list (list[float]) : liste complète de TE
+    """
+    assert len(longueur_paliers) == nb_paliers, "longueur_paliers doit avoir nb_paliers éléments"
+    assert len(valeurs_paliers) == nb_paliers, "valeurs_paliers doit avoir nb_paliers éléments"
+
+    TE_list = []
+    for i in range(nb_paliers):
+        TE_list.extend([valeurs_paliers[i]] * longueur_paliers[i])
+
+    TE_list=[0]+TE_list
+    
+    return TE_list
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_variable_comparison(map_ref, map_obs,
+                             bins_dict=None,
+                             ff_threshold=0.7,
+                             save_path=None, plot_std=True):
+    """
+    Affiche 4 subplots (B1, df, FF, wT1) avec moyennes et écarts-types par bin.
+    Pour wT1, seules les valeurs où FF < ff_threshold sont prises en compte.
+    
+    Parameters
+    ----------
+    map_ref : dict
+        Dictionnaire des maps de référence, avec clés "B1", "df", "FF", "wT1".
+    map_obs : dict
+        Dictionnaire des maps observées correspondantes.
+    bins_dict : dict, optional
+        Dictionnaire {variable: bins} pour chaque paramètre.
+        Si None, des bins par défaut sont utilisés.
+    ff_threshold : float, optional
+        Seuil pour filtrer wT1 en fonction de FF.
+    save_path : str, optional
+        Chemin pour sauvegarder la figure. Si None, la figure n'est pas sauvegardée.
+    """
+
+    # bins par défaut si non fournis
+    if bins_dict is None:
+        bins_dict = {
+            "attB1": np.arange(0.2, 2.0, 0.05),
+            "df": np.arange(-46e-3, 46e-3, 2e-4),
+            "ff": np.arange(0, 0.95, 0.001),
+            "wT1": np.arange(150, 1550, 10)
+        }
+
+    # vérifier que toutes les clés existent dans les deux dictionnaires
+    keys = set(map_ref.keys()) & set(map_obs.keys())
+    required_keys = {"attB1", "df", "ff", "wT1"}
+    if not required_keys.issubset(keys):
+        missing = required_keys - keys
+        raise ValueError(f"Missing keys in maps: {missing}")
+
+    fig, axes = plt.subplots(1, 4, figsize=(20, 7))
+    axes = axes.flatten()
+
+    for ax, name in zip(axes, ["attB1", "df", "ff", "wT1"]):
+        ref = np.ravel(map_ref[name])
+        obs = np.ravel(map_obs[name])
+
+        mean = np.mean(obs)
+        ss_tot = np.sum((obs - mean) ** 2)
+        ss_res = np.sum((obs - ref) ** 2)
+        bias = np.mean((ref - obs))
+        r_2 = 1 - ss_res / ss_tot
+
+        bins = bins_dict[name]
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+        means, stds = [], []
+
+        # Masque pour wT1
+        if name == "wT1":
+            if "ff" not in map_ref:
+                raise ValueError("FF map required for masking wT1")
+            mask = np.ravel(map_ref["ff"]) < ff_threshold
+
+        else:
+            mask = np.ones_like(ref, dtype=bool)
+
+        for b0, b1 in zip(bins[:-1], bins[1:]):
+            M = (ref >= b0) & (ref < b1) & mask
+            if np.any(M):
+                means.append(np.mean(obs[M]))
+                stds.append(np.std(obs[M]))
+            else:
+                means.append(np.nan)
+                stds.append(np.nan)
+        if plot_std is True:
+            ax.errorbar(bin_centers, means, yerr=stds, fmt='x', capsize=3)
+        else :
+            ax.scatter(bin_centers, means)
+        ax.plot(bin_centers, bin_centers, 'r')
+        ax.set_xlabel(f"{name} ref")
+        ax.set_ylabel(f"{name} obs")
+        graph_title = name + " R2:{} Bias:{}".format(np.round(r_2, 4), np.round(bias, 3))
+        ax.set_title(graph_title)
+
+
+    plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Figure saved to {save_path}")
+    plt.show()
